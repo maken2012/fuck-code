@@ -2,7 +2,7 @@
 
 > 原生中文交互的终端 AI 编码工具。目标是从需求到开发测试的完整流程都能在一个工具里完成。
 
-**当前状态：M1 骨架（v0.1.0）** — 空 REPL 已能启动交互，模型接入与工具系统在后续里程碑。
+**当前状态：M2 LLM + 基础 loop（v0.1.0）** — 已接入 Anthropic 流式对话，多轮上下文，Ctrl+C 中断。工具系统在后续里程碑。
 
 ## 快速开始
 
@@ -19,6 +19,19 @@ bun install
 
 > 本项目默认走国内 npm 镜像（`bunfig.toml` 配了 `registry.npmmirror.com`），如需改回官方源修改 `bunfig.toml`。
 
+### 设置 API Key（M2 起）
+
+M2 开始需要 Anthropic API Key 才能真实对话。二选一：
+
+```bash
+# 方式 1：环境变量（推荐）
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# 方式 2：写入配置文件
+mkdir -p ~/.fuckcode
+echo '{"apiKey":"sk-ant-..."}' > ~/.fuckcode/config.json
+```
+
 ### 运行
 
 ```bash
@@ -27,12 +40,9 @@ bun run dev
 
 # 通过 bin 入口运行
 bun run start
-
-# 显示帮助
-bun run dev -- --help
 ```
 
-进入交互 REPL 后会看到欢迎框，可直接输入文字回车（M1 仅回显，M2 接入模型）。`Ctrl+C` / `Ctrl+D` / `/exit` 退出。
+进入交互 REPL 后会看到欢迎框，输入文字回车即可对话（流式显示）。支持多轮上下文。`Ctrl+C` 在生成中中断当前轮次，空闲时退出程序。`/clear` 清空上下文，`/exit` 退出。
 
 ⚠️ fuckcode 需要交互式终端（TTY），不能在管道或重定向 stdin 下运行。
 
@@ -111,7 +121,7 @@ bun run dev           # 启动 REPL
 | 里程碑 | 内容 | 状态 |
 |--------|------|------|
 | **M1 骨架** | Bun 工程 + Effect runtime + Ink REPL + Config/Logger | ✅ |
-| M2 LLM + loop | Anthropic 流式 + queryLoop + 流式渲染 | ⬜ |
+| **M2 LLM + loop** | Anthropic 流式 + queryLoop + 多轮上下文 + abort | ✅ |
 | M3 工具系统 | Tool 接口 + Read/Glob/Grep | ⬜ |
 | M4 写工具 + 权限 | Write/Edit/Bash + 权限决策管线 | ⬜ |
 | M5 会话 + 压缩 | JSONL 存储 + autoCompact | ⬜ |

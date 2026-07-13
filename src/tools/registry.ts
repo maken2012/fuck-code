@@ -8,10 +8,11 @@ import { GrepTool } from '@/tools/Grep.js'
 import { WriteTool } from '@/tools/Write.js'
 import { EditTool } from '@/tools/Edit.js'
 import { BashTool } from '@/tools/Bash.js'
+import { TaskTool } from '@/tools/Task.js'
 
-// 所有内置工具（M3 只读三件套 + M4 写工具三件套）
+// 所有内置工具（只读三件套 + 写工具三件套 + v0.2c Task 子 agent）
 export function getAllTools(): Tool[] {
-  return [ReadTool, GlobTool, GrepTool, WriteTool, EditTool, BashTool]
+  return [ReadTool, GlobTool, GrepTool, WriteTool, EditTool, BashTool, TaskTool]
 }
 
 // 按名字查找工具

@@ -1,30 +1,53 @@
 // src/cli.tsx
-// CLI 参数解析入口。M1 只支持交互式 REPL；print-and-exit 模式留 M2。
+// CLI 参数解析入口。有 prompt → 一次性模式（runOnce）；无 prompt → 交互 REPL。
 import { Command } from '@commander-js/extra-typings'
 import { VERSION, NAME } from '@/version.js'
 import { startRepl } from '@/repl/App.js'
+import { runOnce } from '@/agent/runOnce.js'
 
 const program = new Command()
   .name(NAME)
   .description('原生中文交互的终端 AI 编码工具')
   .version(VERSION)
-  .argument('[prompt]', '可选的一次性提示（v0.2 支持）')
+  .argument('[prompt]', '一次性提示：传了就走非交互模式，不传进 REPL')
   .option('-v, --verbose', '启用详细日志输出', false)
   .option('-m, --model <model>', '覆盖 config.json 的 model（如 claude-sonnet-4-5-20250929）')
   .option('--api-key <key>', '覆盖 config.json 的 apiKey（建议用环境变量）')
   .option('--api-base-url <url>', '覆盖 config.json 的 apiBaseUrl（第三方兼容中转）')
+  .option('--plan', '只读分析模式（不修改任何文件，适合需求分析/代码审查）')
   .action(async (prompt, opts) => {
-    // M1: 无论参数如何，都进 REPL
-    // M2 会在这里分流：有 prompt → 一次性模式；无 prompt → REPL
-    if (prompt) {
-      console.error(`[M1] 一次性模式将在 M2 支持，本次忽略提示，进入交互模式。`)
-    }
-    await startRepl({
-      verbose: opts.verbose,
+    const common = {
       modelOverride: opts.model,
       apiKeyOverride: opts.apiKey,
       apiBaseUrlOverride: opts.apiBaseUrl,
-    })
+    }
+
+    // 有 prompt → 一次性模式
+    if (prompt) {
+      // 读 stdin（如果是管道）
+      let stdin: string | undefined
+      if (!process.stdin.isTTY) {
+        try {
+          const chunks: Buffer[] = []
+          for await (const chunk of process.stdin) {
+            chunks.push(chunk as Buffer)
+          }
+          stdin = Buffer.concat(chunks).toString('utf8').trim() || undefined
+        } catch {
+          // stdin 读失败不阻塞
+        }
+      }
+      await runOnce({
+        prompt,
+        stdin,
+        ...common,
+        permissionMode: opts.plan ? 'plan' : undefined,
+      })
+      return
+    }
+
+    // 无 prompt → 交互 REPL
+    await startRepl({ verbose: opts.verbose, ...common })
   })
 
 // 解析 argv 并启动。供 bin 入口（bin/fuckcode.js）和直接运行（bun run src/cli.tsx）共用。

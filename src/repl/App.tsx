@@ -17,6 +17,17 @@ export async function startRepl(opts: StartReplOpts = {}): Promise<void> {
   // 读一次 config 用于显示（如 model 名）；失败不阻塞启动。
   const config = await getConfig().catch(() => null)
 
+  // Ink 的 useInput 需要 TTY（setRawMode）。非 TTY 环境（CI、管道、重定向 stdin）
+  // 给出友好提示而非 Ink 的红色错误栈。
+  if (!process.stdin.isTTY) {
+    process.stderr.write(
+      `${VERSION} 需要交互式终端（TTY）才能运行。\n` +
+        `当前 stdin 不是 TTY。请直接在终端运行，不要用管道或重定向。\n` +
+        `一次性（非交互）模式将在 M2 支持。\n`,
+    )
+    process.exit(1)
+  }
+
   const instance = render(<Repl version={VERSION} modelName={config?.value.model} />, {
     exitOnCtrlC: false, // 我们自己处理 Ctrl+C
   })

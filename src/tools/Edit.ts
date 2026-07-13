@@ -8,6 +8,7 @@
 // isReadOnly: false，isConcurrencySafe: false。
 import { readFile, writeFile, rename, stat } from 'node:fs/promises'
 import { buildTool } from '@/tools/Tool.js'
+import { checkpoint } from '@/tools/checkpoint.js'
 import { z } from 'zod'
 
 const EditInput = z.object({
@@ -101,6 +102,9 @@ export const EditTool = buildTool<EditInputType>({
       const newContent = replaceAll
         ? content.split(old_string).join(new_string)
         : content.replace(old_string, new_string)
+
+      // v1.6: 写前 checkpoint 备份（失败不阻塞编辑，/rewind 可回滚）
+      await checkpoint(ctx.cwd, file_path).catch(() => {})
 
       // 原子写
       const tmpPath = `${file_path}.tmp.${process.pid}`

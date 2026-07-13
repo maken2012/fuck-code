@@ -54,6 +54,9 @@ export const WriteTool = buildTool<WriteInputType>({
       }
     }
     try {
+      // v1.6: 写前 checkpoint 备份（仅文件已存在时）
+      const { checkpoint } = await import('@/tools/checkpoint.js')
+      await checkpoint(ctx.cwd, file_path).catch(() => {})
       // 原子写：写 .tmp.${pid} 再 rename
       const tmpPath = `${file_path}.tmp.${process.pid}`
       await writeFile(tmpPath, content, 'utf8')

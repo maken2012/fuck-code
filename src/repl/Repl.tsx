@@ -18,6 +18,8 @@ import { runWorkflow } from '@/agent/workflow.js'
 import type { WorkflowStage } from '@/agent/workflow.js'
 import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
 import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
+import { listCheckpoints, restoreCheckpoint } from '@/tools/checkpoint.js'
+import type { Checkpoint } from '@/tools/checkpoint.js'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { getAllTools } from '@/tools/registry.js'
@@ -417,6 +419,36 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     }
   }
 
+  // v1.6: /rewind 列出/恢复文件 checkpoint（Edit/Write 前自动备份）
+  async function handleRewindCommand(text: string): Promise<void> {
+    const parts = text.split(/\s+/)
+    const idx = parts[1] ? parseInt(parts[1]) - 1 : NaN
+    const checkpoints = await listCheckpoints(process.cwd())
+    if (checkpoints.length === 0) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '没有可回滚的 checkpoint（Edit/Write 改文件时会自动创建）' }])
+      return
+    }
+    // 无序号：列出最近的
+    if (isNaN(idx)) {
+      const recent = checkpoints.slice(0, 10)
+      const list = recent.map((c, i) => {
+        const time = new Date(c.timestamp).toLocaleString('zh-CN')
+        const shortPath = c.originalPath.replace(process.cwd() + '/', '')
+        return `${i + 1}. ${shortPath}（${time}，${c.size}B）`
+      }).join('\n')
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `最近的 checkpoint：\n${list}\n\n输入 /rewind <序号> 恢复` }])
+      return
+    }
+    // 有序号：恢复
+    const target = checkpoints[idx]
+    if (!target) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `无效序号（共 ${checkpoints.length} 个，最近 10 个可回滚）` }])
+      return
+    }
+    const ok = await restoreCheckpoint(process.cwd(), target.id)
+    setHistory((h) => [...h, { role: 'assistant' as const, text: ok ? `✓ 已恢复 ${target.originalPath}` : `❌ 恢复失败` }])
+  }
+
   // v1.1: 自定义斜杠命令（.fuckcode/commands/*.md）
   async function handleCustomCommand(name: string, args: string): Promise<void> {
     const commands = await loadCustomCommands(process.cwd())
@@ -618,6 +650,14 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         setInput('')
         return
       }
+      // v1.6: /rewind 文件 checkpoint 回滚（Edit/Write 前自动备份）
+      if (text === '/rewind' || text.startsWith('/rewind ')) {
+        if (!running) {
+          setInput('')
+          void handleRewindCommand(text)
+        }
+        return
+      }
       // v1.0 核心差异化：/workflow <需求> 自动走"理解→实现→验证→回顾"四阶段
       if (text.startsWith('/workflow ')) {
         const requirement = text.slice('/workflow '.length).trim()
@@ -657,6 +697,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
 /model [名] — 查看或切换模型
 /plan <需求> — 分析需求并产出实施计划（只读，不改文件）
 /workflow <需求> — ★ 自动走"理解→实现→验证→回顾"四阶段完整工作流
+/rewind [N] — 回滚文件到 Edit/Write 前的 checkpoint
 /init — 生成 AGENTS.md 模板（项目级 agent 行为约定）
 /agents — 显示当前加载的 AGENTS.md 指令
 /sessions — 列出历史会话

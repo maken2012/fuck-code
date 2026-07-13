@@ -5,10 +5,13 @@ import type { Tool } from '@/tools/Tool.js'
 import { ReadTool } from '@/tools/Read.js'
 import { GlobTool } from '@/tools/Glob.js'
 import { GrepTool } from '@/tools/Grep.js'
+import { WriteTool } from '@/tools/Write.js'
+import { EditTool } from '@/tools/Edit.js'
+import { BashTool } from '@/tools/Bash.js'
 
-// 所有内置工具（M3 只读三件套；M4 加 Write/Edit/Bash）
+// 所有内置工具（M3 只读三件套 + M4 写工具三件套）
 export function getAllTools(): Tool[] {
-  return [ReadTool, GlobTool, GrepTool]
+  return [ReadTool, GlobTool, GrepTool, WriteTool, EditTool, BashTool]
 }
 
 // 按名字查找工具

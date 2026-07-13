@@ -31,6 +31,8 @@ import { streamAnthropic } from '@/llm/anthropic.js'
 import { findTool, toolsToAnthropicFormat } from '@/tools/registry.js'
 import { checkPermission } from '@/permissions/decision.js'
 import type { PermissionMode } from '@/permissions/modes.js'
+import { loadHooks, triggerHooks } from '@/hooks/HookManager.js'
+import type { HooksFile } from '@/hooks/HookManager.js'
 import {
   appendMessages,
   loadMessages,
@@ -100,6 +102,8 @@ export interface QueryLoopOpts {
   _llmOverride?: (opts: object) => AsyncGenerator<LlmEvent>
   /** 测试用：注入 mock Session（生产代码不传） */
   _sessionOverride?: SessionApi
+  /** v1.3: 测试用：注入 mock hooks（生产代码不传，自动从 .fuckcode/hooks.json 加载） */
+  _hooksOverride?: HooksFile
 }
 
 // 给 UI 显示的 input 摘要：Bash→command；Edit/Write→file_path；其他→JSON 截断。
@@ -157,6 +161,15 @@ export async function* queryLoop(
   // 选 Session 实现（测试用 override，生产用 defaultSessionApi）
   const sessionApi = opts._sessionOverride ?? defaultSessionApi
 
+  // v1.3: 加载 hooks 配置（.fuckcode/hooks.json）
+  const hooks: HooksFile = opts._hooksOverride ?? await loadHooks(opts.cwd).catch(() => ({}))
+
+  // UserPromptSubmit hook：用户提交 prompt 时触发，可注入额外上下文
+  const promptHookResult = await triggerHooks('UserPromptSubmit', { prompt: opts.userInput }, hooks, opts.cwd)
+  const effectiveUserInput = promptHookResult.additionalContext
+    ? `${opts.userInput}\n\n[hook 注入上下文]\n${promptHookResult.additionalContext}`
+    : opts.userInput
+
   // M5：如果有 sessionId，加载磁盘历史作为 messages 起点（忽略 opts.history）；
   //     否则回退到调用方传入的 history（M2-M4 兼容）。
   // 失败按空数组处理（loadMessages 自身已容错，这里 catch 保险）。
@@ -170,7 +183,7 @@ export async function* queryLoop(
   }
 
   // 本次用户输入加入 messages。
-  const userMessage: ChatMessage = { role: 'user', content: opts.userInput }
+  const userMessage: ChatMessage = { role: 'user', content: effectiveUserInput }
   messages.push(userMessage)
 
   // 本轮新增的消息（user input + assistant 回复 + tool_result）。
@@ -333,7 +346,7 @@ export async function* queryLoop(
       // 工具执行错误不终止循环（把错误回灌给模型）
       const toolResultBlocks: ContentBlock[] = []
       // 先收集权限通过的工具调用（按原始顺序）
-      const permitted: { tu: { id: string; name: string; input: unknown }; tool: Tool }[] = []
+      const permitted: { tu: { id: string; name: string; input: unknown }; tool: Tool; input: unknown }[] = []
       for (const tu of toolUses) {
         const tool = findTool(tu.name, tools)
         if (!tool) {
@@ -343,10 +356,21 @@ export async function* queryLoop(
           continue
         }
 
+        // v1.3: PreToolUse hook（可改写决策或入参，在权限检查前触发）
+        let effectiveInput: unknown = tu.input
+        const preHook = await triggerHooks('PreToolUse', { tool: tu.name, toolInput: tu.input }, hooks, opts.cwd)
+        if (preHook.updatedInput) effectiveInput = preHook.updatedInput
+        if (preHook.permissionDecision === 'deny') {
+          const content = `hook 拒绝: ${preHook.additionalContext ?? 'PreToolUse hook denied'}`
+          toolResultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content, is_error: true })
+          yield { type: 'tool_result', tool: tu.name, ok: false, content }
+          continue
+        }
+
         // 权限检查
         const perm = await checkPermission({
           tool,
-          input: tu.input,
+          input: effectiveInput,
           ctx: { cwd: opts.cwd, abortSignal: opts.signal, readFileState },
           permissionMode: opts.permissionMode ?? 'default',
           rules: opts.permissions ?? { allow: [], ask: [], deny: [] },
@@ -366,7 +390,7 @@ export async function* queryLoop(
             continue
           }
         }
-        permitted.push({ tu, tool })
+        permitted.push({ tu, tool, input: effectiveInput })
       }
 
       // 分组：并发安全 vs 串行（保持原顺序）
@@ -380,8 +404,8 @@ export async function* queryLoop(
       // 并发安全工具并行执行
       if (concurrencySafe.length > 0) {
         const results = await Promise.all(
-          concurrencySafe.map(async ({ tu, tool }) => {
-            const result = await tool.execute(tu.input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState })
+          concurrencySafe.map(async ({ tu, tool, input }) => {
+            const result = await tool.execute(input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState })
             return { tu, tool, result }
           }),
         )
@@ -398,8 +422,8 @@ export async function* queryLoop(
       }
 
       // 串行工具依次执行（非并发安全：Write/Edit/Bash/Task 等）
-      for (const { tu, tool } of serial) {
-        const result = await tool.execute(tu.input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState })
+      for (const { tu, tool, input } of serial) {
+        const result = await tool.execute(input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState })
         const content = result.ok
           ? (tool.formatResult ? tool.formatResult(result.data) : JSON.stringify(result.data))
           : `错误: ${result.error}`

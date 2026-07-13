@@ -19,13 +19,20 @@ const program = new Command()
     await startRepl({ verbose: opts.verbose })
   })
 
-// 仅当此文件是主入口时解析参数（避免被 import 时副作用执行）
-const isMain = typeof Bun !== 'undefined' && process.argv[1]?.endsWith('cli.tsx')
-if (isMain) {
-  program.parseAsync(process.argv).catch((err: unknown) => {
+// 解析 argv 并启动。供 bin 入口（bin/fuckcode.js）和直接运行（bun run src/cli.tsx）共用。
+// 用显式 run() 而非 import.meta.main 守卫，因为 bin 通过动态 import 本文件时，
+// import.meta.main 会是 false（主入口是 bin/fuckcode.js），导致 parse 永不触发。
+export async function run(argv: string[] = process.argv): Promise<void> {
+  await program.parseAsync(argv).catch((err: unknown) => {
     console.error(`\n${NAME} 启动失败:`, err)
     process.exit(1)
   })
+}
+
+// 当本文件被直接作为主入口运行（bun run src/cli.tsx）时自动启动。
+// 被 import（如测试、bin 转发）时不触发，避免副作用。
+if (typeof Bun !== 'undefined' && import.meta.main) {
+  void run()
 }
 
 export { program }

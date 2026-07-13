@@ -17,11 +17,12 @@
   "dependencies": {
     "@anthropic-ai/sdk": "0.111.0",
     "@commander-js/extra-typings": "15.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "effect": "3.21.4",
     "ink": "7.1.0",
     "openai": "^6.46.0",
     "react": "19.2.7",
-    "zod": "3.24.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bun": "1.2.0",

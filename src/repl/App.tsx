@@ -30,6 +30,27 @@ export async function startRepl(opts: StartReplOpts = {}): Promise<void> {
   const effectiveApiKey = opts.apiKeyOverride ?? config?.value.apiKey
   const effectiveApiBaseUrl = opts.apiBaseUrlOverride ?? config?.value.apiBaseUrl
 
+  // v1.4: 连接 MCP servers（如有 .fuckcode/mcp.json），失败不阻塞启动
+  let mcpToolsCount = 0
+  try {
+    const { loadMcpConfig, connectAllMcpServers } = await import('@/mcp/McpClient.js')
+    const mcpConfig = await loadMcpConfig(process.cwd())
+    if (mcpConfig.mcpServers && Object.keys(mcpConfig.mcpServers).length > 0) {
+      const serverCount = Object.keys(mcpConfig.mcpServers).length
+      process.stderr.write(`\x1b[2m连接 ${serverCount} 个 MCP server...\x1b[0m\n`)
+      const result = await connectAllMcpServers(mcpConfig)
+      mcpToolsCount = result.tools.length
+      if (mcpToolsCount > 0) {
+        process.stderr.write(`\x1b[2m✓ MCP: 加载 ${mcpToolsCount} 个工具（${result.connections.map((c) => c.name).join(', ')}）\x1b[0m\n`)
+      }
+      if (result.errors.length > 0) {
+        process.stderr.write(`\x1b[33m⚠ MCP 连接失败: ${result.errors.join('; ')}\x1b[0m\n`)
+      }
+    }
+  } catch (e) {
+    process.stderr.write(`\x1b[33m⚠ MCP 初始化失败（忽略）: ${String(e)}\x1b[0m\n`)
+  }
+
   // Ink 的 useInput 需要 TTY（setRawMode）。非 TTY 环境（CI、管道、重定向 stdin）
   // 给出友好提示而非 Ink 的红色错误栈。
   if (!process.stdin.isTTY) {

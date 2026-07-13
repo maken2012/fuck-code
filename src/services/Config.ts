@@ -18,7 +18,7 @@ export const ConfigSchema = z.object({
       ask: z.array(z.string()).default([]),
       deny: z.array(z.string()).default([]),
     })
-    .default({}),
+    .default(() => ({ allow: [], ask: [], deny: [] })),
   permissionMode: z
     .enum(['default', 'acceptEdits', 'plan', 'bypassPermissions'])
     .default('default'),

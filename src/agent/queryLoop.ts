@@ -12,6 +12,14 @@
 //      f. yield turn_end(stopReason='tool_use')，继续下一轮
 //   3. 超过 MAX_TURNS：yield error
 //
+// M5 新增：可选 session 持久化 + autoCompact。
+//   - opts.sessionId：提供时启动期 loadMessages 作为 messages 起点，
+//     每轮新消息 appendMessages 到 JSONL。
+//   - opts.contextWindow：用于 getCompactThreshold，每轮开始前检查
+//     estimateMessagesTokens > threshold 时调 compactConversation 生成摘要，
+//     writeCompactBoundary 写盘 + 内存 messages 替换为 compact boundary，
+//     yield { type: 'compacted' } 通知 UI。
+//
 // 关键约定（M2 兼容）：
 // - opts.history 的 content 仍用 string（Repl 层简化）
 // - queryLoop 内部 messages 用 string | ContentBlock[] 的完整结构化形态
@@ -23,9 +31,48 @@ import { streamAnthropic } from '@/llm/anthropic.js'
 import { findTool, toolsToAnthropicFormat } from '@/tools/registry.js'
 import { checkPermission } from '@/permissions/decision.js'
 import type { PermissionMode } from '@/permissions/modes.js'
+import {
+  appendMessages,
+  loadMessages,
+  writeCompactBoundary,
+} from '@/services/Session.js'
+import { estimateMessagesTokens } from '@/utils/tokens.js'
+import {
+  compactConversation,
+  getCompactThreshold,
+} from '@/agent/compact.js'
 
 // 防止模型无限调工具导致死循环（M3 安全护栏）
 const MAX_TURNS = 20
+
+// 默认 contextWindow（与 Config.ts 的 schema 默认一致）
+const DEFAULT_CONTEXT_WINDOW = 200000
+
+// Session 服务接口（用于生产代码直接 import + 测试用 _sessionOverride 注入）。
+// 把 queryLoop 实际依赖的 Session 函数收拢成一个对象，便于 mock。
+export interface SessionApi {
+  loadMessages: (
+    sessionId: string,
+    cwd: string,
+  ) => Promise<ChatMessage[]>
+  appendMessages: (
+    sessionId: string,
+    cwd: string,
+    messages: ChatMessage[],
+  ) => Promise<void>
+  writeCompactBoundary: (
+    sessionId: string,
+    cwd: string,
+    summary: string,
+  ) => Promise<void>
+}
+
+// 默认 Session 实现：直接调 src/services/Session.ts 的导出。
+const defaultSessionApi: SessionApi = {
+  loadMessages,
+  appendMessages,
+  writeCompactBoundary,
+}
 
 export interface QueryLoopOpts {
   history: ChatMessage[] // 已有对话历史（不含本次 user 输入）
@@ -43,8 +90,14 @@ export interface QueryLoopOpts {
   permissionMode?: PermissionMode
   /** M4：权限规则（allow/ask/deny 三类规则字符串） */
   permissions?: { allow: string[]; ask: string[]; deny: string[] }
+  /** M5：会话 id（提供则启用 JSONL 持久化 + 跨启动恢复历史） */
+  sessionId?: string
+  /** M5：上下文窗口大小，用于 autoCompact 阈值（默认 200000） */
+  contextWindow?: number
   /** 测试用：注入 mock streamAnthropic（生产代码不传） */
   _llmOverride?: (opts: object) => AsyncGenerator<LlmEvent>
+  /** 测试用：注入 mock Session（生产代码不传） */
+  _sessionOverride?: SessionApi
 }
 
 // 给 UI 显示的 input 摘要：Bash→command；Edit/Write→file_path；其他→JSON 截断。
@@ -99,20 +152,80 @@ export async function* queryLoop(
   // M4：跨工具共享的已读文件状态（Read 写入；Edit/Write 执行前校验）
   const readFileState = new Map<string, { mtime: number; readAt: number }>()
 
-  // 内部消息数组：复制 history + 加本次 user 输入。
-  // history 的 content 在 M2 是 string；queryLoop 内部可能产生结构化数组。
-  const messages: ChatMessage[] = [
-    ...opts.history,
-    { role: 'user', content: opts.userInput },
-  ]
+  // 选 Session 实现（测试用 override，生产用 defaultSessionApi）
+  const sessionApi = opts._sessionOverride ?? defaultSessionApi
+
+  // M5：如果有 sessionId，加载磁盘历史作为 messages 起点（忽略 opts.history）；
+  //     否则回退到调用方传入的 history（M2-M4 兼容）。
+  // 失败按空数组处理（loadMessages 自身已容错，这里 catch 保险）。
+  let messages: ChatMessage[]
+  if (opts.sessionId) {
+    messages = await sessionApi
+      .loadMessages(opts.sessionId, opts.cwd)
+      .catch(() => [] as ChatMessage[])
+  } else {
+    messages = [...opts.history]
+  }
+
+  // 本次用户输入加入 messages。
+  const userMessage: ChatMessage = { role: 'user', content: opts.userInput }
+  messages.push(userMessage)
+
+  // 本轮新增的消息（user input + assistant 回复 + tool_result）。
+  // 每个 turn 内累积，turn 结束后 flush 到磁盘。第一个 turn 的 user input 也要落盘。
+  // 注意：若触发了 autoCompact，新增队列要重置（compact 已落盘 boundary）。
+  let pendingPersist: ChatMessage[] = [userMessage]
 
   // 选 LLM stream 函数（测试用 override，生产用 streamAnthropic）
   const streamFn =
     opts._llmOverride ??
     (streamAnthropic as (o: object) => AsyncGenerator<LlmEvent>)
 
+  // M5：autoCompact 阈值（默认 200000 contextWindow）
+  const contextWindow = opts.contextWindow ?? DEFAULT_CONTEXT_WINDOW
+  const compactThreshold = getCompactThreshold(contextWindow)
+
   try {
     for (let turn = 1; turn <= MAX_TURNS; turn++) {
+      // M5：每轮调 LLM 前检查 token 是否超阈值 → 触发压缩。
+      // 用 estimateMessagesTokens 粗估；超阈值就 compactConversation 生成摘要。
+      if (
+        opts.sessionId &&
+        estimateMessagesTokens(messages) > compactThreshold
+      ) {
+        const summary = await compactConversation(messages, {
+          model: opts.model,
+          apiKey: opts.apiKey,
+          signal: opts.signal,
+          _llmOverride: opts._llmOverride,
+        }).catch(() => '')
+        if (summary) {
+          // 写 boundary 到磁盘（持久化压缩点）
+          await sessionApi
+            .writeCompactBoundary(opts.sessionId, opts.cwd, summary)
+            .catch(() => {})
+          // 内存里：messages 替换成只含 boundary
+          messages = [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: `<compact>之前对话的摘要：\n${summary}</compact>`,
+                  _meta: { compactBoundary: true },
+                } as ContentBlock & {
+                  _meta: { compactBoundary: boolean }
+                },
+              ],
+            },
+          ]
+          // 重置持久化队列：boundary 已通过 writeCompactBoundary 落盘，
+          // 不需要 pendingPersist 重复写它。
+          pendingPersist = []
+          yield { type: 'compacted', summary }
+        }
+      }
+
       let assistantText = ''
       // 收集本轮所有 tool_use（执行后拼回 messages）
       const toolUses: {
@@ -174,7 +287,18 @@ export async function* queryLoop(
       // - 纯文本（无 tool_use）→ string content（M2 兼容）
       // - 含 tool_use → 结构化数组（text block + tool_use blocks）
       if (toolUses.length === 0) {
-        messages.push({ role: 'assistant', content: assistantText })
+        const assistantMsg: ChatMessage = {
+          role: 'assistant',
+          content: assistantText,
+        }
+        messages.push(assistantMsg)
+        pendingPersist.push(assistantMsg)
+        // M5：持久化本轮新增（user + assistant）
+        if (opts.sessionId) {
+          await sessionApi
+            .appendMessages(opts.sessionId, opts.cwd, pendingPersist)
+            .catch(() => {})
+        }
         yield { type: 'turn_end', stopReason }
         yield { type: 'done' }
         return
@@ -191,7 +315,12 @@ export async function* queryLoop(
           input: tu.input,
         })
       }
-      messages.push({ role: 'assistant', content: assistantBlocks })
+      const assistantMsg: ChatMessage = {
+        role: 'assistant',
+        content: assistantBlocks,
+      }
+      messages.push(assistantMsg)
+      pendingPersist.push(assistantMsg)
 
       // 执行所有工具，收集结果。工具执行错误不终止循环（把错误回灌给模型）
       const toolResultBlocks: ContentBlock[] = []
@@ -293,11 +422,32 @@ export async function* queryLoop(
       }
 
       // tool_result 拼回 messages（结构化 user content），继续下一轮
-      messages.push({ role: 'user', content: toolResultBlocks })
+      const toolResultMsg: ChatMessage = {
+        role: 'user',
+        content: toolResultBlocks,
+      }
+      messages.push(toolResultMsg)
+      pendingPersist.push(toolResultMsg)
+
+      // M5：持久化本轮新增（assistant + tool_results）。
+      // 中间 tool 轮也写盘 —— 后续若中断重启仍能恢复到合理位置。
+      if (opts.sessionId) {
+        await sessionApi
+          .appendMessages(opts.sessionId, opts.cwd, pendingPersist)
+          .catch(() => {})
+        // 清空 pending（下一轮从空开始）
+        pendingPersist = []
+      }
       yield { type: 'turn_end', stopReason: 'tool_use' }
     }
 
     // 超过 MAX_TURNS：yield error + done（recoverable=true 让 Repl 能继续）
+    // 兜底：把残留 pendingPersist 也落盘（防止丢 user input）
+    if (opts.sessionId && pendingPersist.length > 0) {
+      await sessionApi
+        .appendMessages(opts.sessionId, opts.cwd, pendingPersist)
+        .catch(() => {})
+    }
     yield {
       type: 'error',
       error: new Error(`达到最大轮次限制（${MAX_TURNS}）`),
@@ -306,6 +456,12 @@ export async function* queryLoop(
     yield { type: 'done' }
   } catch (e) {
     if (opts.signal.aborted) {
+      // 中断时把已生成的内容落盘（保证可 resume）
+      if (opts.sessionId && pendingPersist.length > 0) {
+        await sessionApi
+          .appendMessages(opts.sessionId, opts.cwd, pendingPersist)
+          .catch(() => {})
+      }
       yield { type: 'aborted' }
       yield { type: 'done' }
       return

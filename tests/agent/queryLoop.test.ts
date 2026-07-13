@@ -3,12 +3,13 @@
 import { test, expect, mock, beforeEach } from 'bun:test'
 import { mkdir, writeFile, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import type { LlmEvent } from '@/llm/types.js'
+import type { ChatMessage, LlmEvent } from '@/llm/types.js'
 import { ReadTool } from '@/tools/Read.js'
 import { BashTool } from '@/tools/Bash.js'
 
 // 用动态 import 加载被测模块（顶层 await）
 const { queryLoop } = await import('@/agent/queryLoop.js')
+import type { SessionApi } from '@/agent/queryLoop.js'
 
 // _llmOverride 的签名：与 queryLoop 内 _llmOverride 一致（接收 opts: object，返回 LlmEvent 异步生成器）
 // 用 object 是为了让 mock 不必精确刻画 LLM 子选项，且与生产 streamAnthropic 调用点兼容。
@@ -524,4 +525,305 @@ test('权限 bypassPermissions：不询问，所有工具直接执行', async ()
   } finally {
     await rm(tmpDir, { recursive: true, force: true })
   }
+})
+
+// === M5 Task 4 测试：session 持久化 + autoCompact ===
+//
+// 通过 _sessionOverride 注入 mock SessionApi（与 _llmOverride 同模式），
+// 验证 queryLoop 在 sessionId 存在时调 loadMessages（启动期）和 appendMessages（每轮）。
+
+// 构造一个 mock SessionApi：每个方法都是 bun:test mock，便于断言调用。
+function createMockSessionApi(initialMessages: ChatMessage[] = []): {
+  api: SessionApi
+  loadMock: ReturnType<typeof mock>
+  appendMock: ReturnType<typeof mock>
+  writeBoundaryMock: ReturnType<typeof mock>
+  pushedMessages: ChatMessage[]
+  writtenSummaries: string[]
+} {
+  const pushedMessages: ChatMessage[] = []
+  const writtenSummaries: string[] = []
+  const loadMock = mock(async () => initialMessages)
+  const appendMock = mock(async (_sid: string, _cwd: string, msgs: ChatMessage[]) => {
+    pushedMessages.push(...msgs)
+  })
+  const writeBoundaryMock = mock(async (_sid: string, _cwd: string, summary: string) => {
+    writtenSummaries.push(summary)
+  })
+  const api: SessionApi = {
+    loadMessages: loadMock as unknown as SessionApi['loadMessages'],
+    appendMessages: appendMock as unknown as SessionApi['appendMessages'],
+    writeCompactBoundary:
+      writeBoundaryMock as unknown as SessionApi['writeCompactBoundary'],
+  }
+  return { api, loadMock, appendMock, writeBoundaryMock, pushedMessages, writtenSummaries }
+}
+
+test('M5 session：有 sessionId 时启动期 loadMessages，每轮 appendMessages', async () => {
+  // 模拟已有磁盘历史（恢复场景）
+  const initialHistory: ChatMessage[] = [
+    { role: 'user', content: '上次问的' },
+    { role: 'assistant', content: '上次答的' },
+  ]
+  const { api, loadMock, appendMock, pushedMessages } = createMockSessionApi(
+    initialHistory,
+  )
+
+  // LLM 第一轮就返回纯文本（最简：一轮结束）
+  mockStream.mockImplementation(() =>
+    fakeLlmEvents([
+      { type: 'text', textDelta: '这是回复' },
+      { type: 'done', stopReason: 'end_turn' },
+    ]),
+  )
+
+  const events = []
+  for await (const e of queryLoop({
+    history: [], // 有 sessionId 时被忽略
+    userInput: '继续',
+    model: 'm',
+    system: 's',
+    cwd: '/tmp',
+    signal: new AbortController().signal,
+    sessionId: 'sess-123',
+    _llmOverride: mockStream,
+    _sessionOverride: api,
+  })) {
+    events.push(e)
+  }
+
+  // loadMessages 应被调用一次（启动期）
+  expect(loadMock).toHaveBeenCalledTimes(1)
+  // appendMessages 应被调用至少一次（最终轮写盘）
+  expect(appendMock.mock.calls.length).toBeGreaterThanOrEqual(1)
+  // 落盘消息应含：user input + assistant 回复
+  expect(pushedMessages).toEqual([
+    { role: 'user', content: '继续' },
+    { role: 'assistant', content: '这是回复' },
+  ])
+
+  // 正常事件转发
+  expect(events.find((e) => e.type === 'text_delta')).toBeDefined()
+  expect(events.find((e) => e.type === 'done')).toBeDefined()
+})
+
+test('M5 session：loadMessages 失败时不崩，按空历史继续', async () => {
+  // loadMock 抛错（文件损坏模拟）
+  const failingLoad = mock(async () => {
+    throw new Error('disk read failed')
+  })
+  const appendMock = mock(async () => {})
+  const api: SessionApi = {
+    loadMessages: failingLoad as unknown as SessionApi['loadMessages'],
+    appendMessages: appendMock as unknown as SessionApi['appendMessages'],
+    writeCompactBoundary: mock(async () => {}) as unknown as SessionApi['writeCompactBoundary'],
+  }
+
+  mockStream.mockImplementation(() =>
+    fakeLlmEvents([
+      { type: 'text', textDelta: 'ok' },
+      { type: 'done', stopReason: 'end_turn' },
+    ]),
+  )
+
+  const events = []
+  for await (const e of queryLoop({
+    history: [],
+    userInput: 'hi',
+    model: 'm',
+    system: 's',
+    cwd: '/tmp',
+    signal: new AbortController().signal,
+    sessionId: 'sess-fail',
+    _llmOverride: mockStream,
+    _sessionOverride: api,
+  })) {
+    events.push(e)
+  }
+  // 不应报错；应正常 done
+  expect(events.find((e) => e.type === 'done')).toBeDefined()
+  expect(events.find((e) => e.type === 'error')).toBeUndefined()
+})
+
+test('M5 session：工具循环（多轮）每轮 appendMessages 都被调用', async () => {
+  const tmpDir = resolve(
+    process.env.TMPDIR || '/tmp',
+    'fc-qloop-session-multi-' + process.pid,
+  )
+  await mkdir(tmpDir, { recursive: true })
+  const filePath = resolve(tmpDir, 'data.txt')
+  await writeFile(filePath, 'hello world')
+
+  try {
+    const { api, appendMock } = createMockSessionApi([])
+
+    let callCount = 0
+    mockStream.mockImplementation(() => {
+      callCount++
+      if (callCount === 1) {
+        return fakeLlmEvents([
+          { type: 'text', textDelta: '读文件' },
+          {
+            type: 'tool_use',
+            toolName: 'Read',
+            toolUseId: 'tu_1',
+            input: { file_path: filePath },
+          },
+          { type: 'done', stopReason: 'tool_use' },
+        ])
+      }
+      return fakeLlmEvents([
+        { type: 'text', textDelta: '读完' },
+        { type: 'done', stopReason: 'end_turn' },
+      ])
+    })
+
+    const events = []
+    for await (const e of queryLoop({
+      history: [],
+      userInput: '读',
+      model: 'm',
+      system: 's',
+      cwd: tmpDir,
+      tools: [ReadTool],
+      signal: new AbortController().signal,
+      sessionId: 'sess-multi',
+      _llmOverride: mockStream,
+      _sessionOverride: api,
+    })) {
+      events.push(e)
+    }
+
+    // 第一轮工具调用结束后 append 一次（assistant + tool_result），
+    // 第二轮结束 append 一次（user input + final assistant）。
+    // 共两次。
+    expect(appendMock.mock.calls.length).toBe(2)
+    expect(events.find((e) => e.type === 'done')).toBeDefined()
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true })
+  }
+})
+
+// autoCompact：构造超大 messages + 低 contextWindow，使其越过阈值，
+// 验证 queryLoop 触发 compacted 事件 + writeCompactBoundary 被调。
+test('M5 autoCompact：超过阈值触发压缩，yield compacted + writeCompactBoundary', async () => {
+  // 历史里塞一条超长文本（让 estimateMessagesTokens 超 threshold）
+  // contextWindow=1000 → threshold=987；构造一条 ~5000 token 的文本足够
+  const bigText = 'a'.repeat(20000) // ~5000 tokens
+  const history: ChatMessage[] = [
+    { role: 'user', content: bigText },
+    { role: 'assistant', content: bigText },
+  ]
+  const { api, writeBoundaryMock, writtenSummaries } =
+    createMockSessionApi(history)
+
+  // compact 用的 LLM 返回摘要；正常对话 LLM 返回简短文本。
+  // 注意：mockStream 会被两个用途共用（compact + 主对话），每次调用按序返回。
+  let callCount = 0
+  mockStream.mockImplementation(() => {
+    callCount++
+    if (callCount === 1) {
+      // 第一次：compact 调用 → 返回摘要文本
+      return fakeLlmEvents([
+        { type: 'text', textDelta: '这是摘要' },
+        { type: 'done', stopReason: 'end_turn' },
+      ])
+    }
+    // 第二次：主对话 → 正常回复
+    return fakeLlmEvents([
+      { type: 'text', textDelta: '收到' },
+      { type: 'done', stopReason: 'end_turn' },
+    ])
+  })
+
+  const events = []
+  for await (const e of queryLoop({
+    history: [],
+    userInput: '继续',
+    model: 'm',
+    system: 's',
+    cwd: '/tmp',
+    signal: new AbortController().signal,
+    sessionId: 'sess-compact',
+    contextWindow: 1000, // threshold=987，bigText 已超
+    _llmOverride: mockStream,
+    _sessionOverride: api,
+  })) {
+    events.push(e)
+  }
+
+  // 应有 compacted 事件
+  const compacted = events.find((e) => e.type === 'compacted')
+  if (compacted && compacted.type === 'compacted') {
+    expect(compacted.summary).toBe('这是摘要')
+  } else {
+    throw new Error('missing compacted event')
+  }
+  // writeCompactBoundary 应被调用一次，summary 写入
+  expect(writeBoundaryMock).toHaveBeenCalledTimes(1)
+  expect(writtenSummaries).toEqual(['这是摘要'])
+  // 主对话完成
+  expect(events.find((e) => e.type === 'done')).toBeDefined()
+})
+
+// autoCompact：未超阈值时不触发（保护：不会无故 compact）
+test('M5 autoCompact：token 未超阈值时不触发压缩', async () => {
+  const { api, writeBoundaryMock } = createMockSessionApi([
+    { role: 'user', content: '短消息' },
+  ])
+
+  mockStream.mockImplementation(() =>
+    fakeLlmEvents([
+      { type: 'text', textDelta: '回复' },
+      { type: 'done', stopReason: 'end_turn' },
+    ]),
+  )
+
+  const events = []
+  for await (const e of queryLoop({
+    history: [],
+    userInput: 'hi',
+    model: 'm',
+    system: 's',
+    cwd: '/tmp',
+    signal: new AbortController().signal,
+    sessionId: 'sess-no-compact',
+    contextWindow: 200000, // 默认阈值，短消息远不超
+    _llmOverride: mockStream,
+    _sessionOverride: api,
+  })) {
+    events.push(e)
+  }
+  expect(events.find((e) => e.type === 'compacted')).toBeUndefined()
+  expect(writeBoundaryMock).not.toHaveBeenCalled()
+})
+
+// autoCompact：sessionId 不传时即使 token 多也不压缩（autoCompact 强依赖 sessionId）
+test('M5 autoCompact：无 sessionId 时即使超阈值也不触发压缩', async () => {
+  const bigText = 'a'.repeat(50000)
+  mockStream.mockImplementation(() =>
+    fakeLlmEvents([
+      { type: 'text', textDelta: '回复' },
+      { type: 'done', stopReason: 'end_turn' },
+    ]),
+  )
+
+  const events = []
+  for await (const e of queryLoop({
+    history: [
+      { role: 'user', content: bigText },
+      { role: 'assistant', content: bigText },
+    ],
+    userInput: 'hi',
+    model: 'm',
+    system: 's',
+    cwd: '/tmp',
+    signal: new AbortController().signal,
+    // 不传 sessionId
+    contextWindow: 1000,
+    _llmOverride: mockStream,
+  })) {
+    events.push(e)
+  }
+  expect(events.find((e) => e.type === 'compacted')).toBeUndefined()
 })

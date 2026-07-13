@@ -5,6 +5,7 @@
 // M4 新增 permission_request：工具执行前需要用户确认（checkPermission 返回 ask）。
 //   携带 resolve 回调，Repl 显示弹窗后调 resolve('allow'|'deny')，
 //   queryLoop 内部 await 该 promise 后继续/跳过该工具。
+// M5 新增 compacted：autoCompact 触发后通知 UI（旧消息已压成摘要）。
 export type PermissionUserDecision = 'allow' | 'deny'
 
 export type QueryEvent =
@@ -27,6 +28,8 @@ export type QueryEvent =
       inputSummary: string
       resolve: (decision: PermissionUserDecision) => void
     }
+  // M5 新增：autoCompact 触发，messages 已被摘要替换。UI 可提示"已压缩上下文"。
+  | { type: 'compacted'; summary: string }
   | { type: 'turn_end'; stopReason: string } // 一轮结束（含 tool_use 轮次）
   | { type: 'usage'; input: number; output: number; cacheRead: number }
   | { type: 'aborted' } // 被用户中断

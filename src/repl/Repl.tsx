@@ -5,6 +5,9 @@
 //
 // M4：工具执行前若 queryLoop yield permission_request，渲染权限弹窗，
 //   用户按 y/n 后调 resolve('allow'|'deny') 让 queryLoop 继续。
+// M5：启动期创建 session，每次 runQuery 把 sessionId + contextWindow 传给 queryLoop，
+//   queryLoop 负责 loadMessages/appendMessages/autoCompact。
+//   /sessions 列出历史会话；/resume [N] 恢复历史会话（替换 chatHistoryRef + sessionId）。
 import React, { useState, useRef, useEffect } from 'react'
 import { Box, Text, useInput, useApp } from 'ink'
 import type { ChatMessage } from '@/llm/types.js'
@@ -14,6 +17,12 @@ import { getAllTools } from '@/tools/registry.js'
 import { getConfig } from '@/services/runtime.js'
 import type { PermissionMode } from '@/permissions/modes.js'
 import type { PermissionUserDecision } from '@/agent/types.js'
+import {
+  createSession,
+  listSessions,
+  loadMessages,
+} from '@/services/Session.js'
+import type { SessionMeta } from '@/services/Session.js'
 
 export interface ReplProps {
   version?: string
@@ -41,19 +50,24 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
   const [configLoaded, setConfigLoaded] = useState(false)
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null)
+  // M5：当前会话 id（启动期创建）。null 表示尚未就绪（首次创建 in flight）。
+  const [sessionId, setSessionId] = useState<string | null>(null)
   const chatHistoryRef = useRef<ChatMessage[]>([])
   const abortRef = useRef<AbortController | null>(null)
   const configRef = useRef<{
     model: string
     apiKey?: string
     maxTokens: number
+    contextWindow: number
     permissionMode: PermissionMode
     permissions: { allow: string[]; ask: string[]; deny: string[] }
   } | null>(null)
   // 持有 pendingPermission 的最新引用（useInput 闭包读不到 React 最新 state）
   const pendingPermissionRef = useRef<PendingPermission | null>(null)
+  // M5：/sessions 列表展示的最近会话（/resume N 取第 N 项）
+  const sessionsListRef = useRef<SessionMeta[]>([])
 
-  // 启动时读一次 config（异步，失败用默认值）
+  // 启动时读一次 config + 创建 session（异步，失败用默认值）
   useEffect(() => {
     getConfig()
       .then((c) => {
@@ -61,6 +75,7 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
           model: c.value.model,
           apiKey: c.value.apiKey,
           maxTokens: c.value.maxTokens,
+          contextWindow: c.value.contextWindow,
           permissionMode: c.value.permissionMode,
           permissions: c.value.permissions,
         }
@@ -69,17 +84,21 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
         configRef.current = {
           model: 'claude-sonnet-4-5-20250929',
           maxTokens: 8192,
+          contextWindow: 200000,
           permissionMode: 'default',
           permissions: { allow: [], ask: [], deny: [] },
         }
       })
       .finally(() => setConfigLoaded(true))
+    // 创建初始 session（失败不致命：queryLoop 不传 sessionId 仍能跑）
+    createSession(process.cwd()).then(setSessionId).catch(() => {})
   }, [])
 
   async function runQuery(text: string) {
     const config = configRef.current ?? {
       model: 'claude-sonnet-4-5-20250929',
       maxTokens: 8192,
+      contextWindow: 200000,
       permissionMode: 'default' as PermissionMode,
       permissions: { allow: [], ask: [], deny: [] },
     }
@@ -109,6 +128,9 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
         // M4：传权限模式 + 规则给 queryLoop，工具执行前调 checkPermission
         permissionMode: config.permissionMode,
         permissions: config.permissions,
+        // M5：会话持久化 + autoCompact 阈值
+        sessionId: sessionId ?? undefined,
+        contextWindow: config.contextWindow,
       })) {
         switch (event.type) {
           case 'text_delta':
@@ -151,11 +173,23 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
             setPendingPermission(pending)
             break
           }
+          case 'compacted': {
+            // 上下文已压缩 —— 告知用户（摘要前 80 字预览）。
+            setHistory((h) => [
+              ...h,
+              {
+                role: 'assistant',
+                text: `📐 已压缩上下文（${event.summary.slice(0, 80)}...）`,
+              },
+            ])
+            break
+          }
           case 'turn_end':
-            // 只在最终轮（非 tool_use）把本轮对话存入历史。
+            // 只在最终轮（非 tool_use）把本轮对话存入 chatHistoryRef。
             // 工具调用中间轮（stopReason='tool_use'）不存——避免重复 push
-            // 和跨轮文本累积污染。queryLoop 内部用完整结构化 messages，
-            // Repl 历史只存文本摘要（M2 兼容）。
+            // 和跨轮文本累积污染。
+            // 注意：sessionId 存在时，磁盘历史由 queryLoop 维护，
+            // chatHistoryRef 仅作显示用（M5 也可在 resume 后留空）。
             if (event.stopReason !== 'tool_use') {
               chatHistoryRef.current = [
                 ...chatHistoryRef.current,
@@ -182,6 +216,7 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
               },
             ])
             break
+          case 'usage':
           case 'done':
             break
         }
@@ -206,6 +241,68 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
         setPendingPermission(null)
       }
     }
+  }
+
+  // M5：/sessions 与 /resume 命令（异步，useInput 回调本身不能 await）。
+  // - /sessions：列出最近 5 个会话（倒序，最近在前），存到 sessionsListRef
+  // - /resume [N]：取 sessionsListRef 第 N 项恢复 —— loadMessages 替换 chatHistoryRef
+  //   + setSessionId 让后续 runQuery 走恢复路径
+  async function handleSessionCommand(text: string): Promise<boolean> {
+    if (text === '/sessions' || text === '/resume') {
+      const sessions = await listSessions(process.cwd())
+      if (sessions.length === 0) {
+        setHistory((h) => [
+          ...h,
+          { role: 'assistant', text: '没有历史会话' },
+        ])
+      } else {
+        // listSessions 已按 lastMessageAt 倒序（最近在前），取前 5 个
+        const recent = sessions.slice(0, 5)
+        sessionsListRef.current = recent
+        const list = recent
+          .map(
+            (s, i) =>
+              `${i + 1}. ${s.title}（${s.messageCount} 条，${new Date(
+                s.lastMessageAt,
+              ).toLocaleString('zh-CN')}）`,
+          )
+          .join('\n')
+        setHistory((h) => [
+          ...h,
+          { role: 'assistant', text: `历史会话：\n${list}\n\n输入 /resume <序号> 恢复` },
+        ])
+      }
+      setInput('')
+      return true
+    }
+    if (text.startsWith('/resume ')) {
+      const idx = parseInt(text.split(' ')[1] ?? '', 10) - 1
+      const sessions = sessionsListRef.current
+      const target = Number.isNaN(idx) ? undefined : sessions[idx]
+      if (!target) {
+        setHistory((h) => [
+          ...h,
+          { role: 'assistant', text: '无效的序号。先 /sessions 查看列表。' },
+        ])
+        setInput('')
+        return true
+      }
+      const msgs = await loadMessages(target.id, process.cwd()).catch(
+        () => [] as ChatMessage[],
+      )
+      chatHistoryRef.current = msgs
+      setSessionId(target.id)
+      setHistory((h) => [
+        ...h,
+        {
+          role: 'assistant',
+          text: `✓ 已恢复会话（${msgs.length} 条消息）`,
+        },
+      ])
+      setInput('')
+      return true
+    }
+    return false
   }
 
   useInput((inputChar, key) => {
@@ -254,6 +351,14 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
         chatHistoryRef.current = []
         setHistory([])
         setInput('')
+        return
+      }
+      // M5：/sessions 与 /resume N 是异步命令，用 void 包装避免阻塞 useInput
+      if (text === '/sessions' || text === '/resume' || text.startsWith('/resume ')) {
+        if (!running) {
+          setInput('')
+          void handleSessionCommand(text)
+        }
         return
       }
       if (text && !running) {
@@ -320,7 +425,7 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
             ? '等待权限确认...'
             : running
               ? '正在生成... Ctrl+C 中断当前轮次'
-              : 'Ctrl+C 退出 · 输入 /clear 清空上下文 · /exit 退出'}
+              : 'Ctrl+C 退出 · /clear 清空 · /sessions 历史 · /resume N 恢复 · /exit 退出'}
         </Text>
       </Box>
     </Box>

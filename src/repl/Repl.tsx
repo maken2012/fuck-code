@@ -14,6 +14,8 @@ import type { ChatMessage } from '@/llm/types.js'
 import { queryLoop } from '@/agent/queryLoop.js'
 import { buildSystemPrompt } from '@/agent/systemPrompt.js'
 import { PLAN_MODE_INSTRUCTION } from '@/agent/planPrompt.js'
+import { runWorkflow } from '@/agent/workflow.js'
+import type { WorkflowStage } from '@/agent/workflow.js'
 import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -321,6 +323,96 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     }
   }
 
+  // v1.0 核心差异化：/workflow <需求> —— 自动走"理解→实现→验证→回顾"四阶段
+  async function runWorkflowTask(requirement: string) {
+    const config = configRef.current ?? { model: 'claude-sonnet-4-5-20250929', maxTokens: 8192, contextWindow: 200000, permissionMode: 'default' as const, permissions: { allow: [], ask: [], deny: [] } }
+    const ac = new AbortController()
+    abortRef.current = ac
+    setRunning(true)
+    setHistory((h) => [
+      ...h,
+      { role: 'user' as const, text: `🔧 [工作流] ${requirement}` },
+    ])
+    const stageLabels: Record<WorkflowStage, string> = {
+      understand: '🧠 理解需求',
+      implement: '⚙️ 实现代码',
+      verify: '✅ 验证测试',
+      summarize: '📋 回顾汇报',
+    }
+    try {
+      for await (const event of runWorkflow({
+        requirement,
+        model: currentModel,
+        apiKey: config.apiKey,
+        ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+        signal: ac.signal,
+        cwd: process.cwd(),
+        config: {
+          maxTokens: config.maxTokens,
+          contextWindow: config.contextWindow,
+          permissions: config.permissions,
+        },
+      })) {
+        switch (event.type) {
+          case 'workflow_stage_start':
+            setHistory((h) => [
+              ...h,
+              { role: 'assistant' as const, text: `\n--- ${stageLabels[event.stage]} ---\n` },
+              { role: 'assistant' as const, text: '' },
+            ])
+            break
+          case 'workflow_text': {
+            // 追加到当前阶段最后一条 assistant 消息
+            setHistory((h) => {
+              const copy = [...h]
+              const last = copy[copy.length - 1]
+              if (last && last.role === 'assistant') {
+                copy[copy.length - 1] = { role: 'assistant' as const, text: last.text + event.textDelta }
+              }
+              return copy
+            })
+            break
+          }
+          case 'workflow_tool':
+            setHistory((h) => [
+              ...h,
+              { role: 'assistant' as const, text: `  📖 ${event.tool}: ${event.summary}` },
+            ])
+            break
+          case 'workflow_stage_end':
+            // 阶段结束不额外渲染（文本已在 workflow_text 累积）
+            break
+          case 'workflow_done':
+            setHistory((h) => [
+              ...h,
+              { role: 'assistant' as const, text: `\n✨ 工作流完成（四阶段全跑完）` },
+            ])
+            break
+          case 'workflow_aborted':
+            setHistory((h) => [
+              ...h,
+              { role: 'assistant' as const, text: `\n⚠ 工作流被中断（已完成阶段：${event.completedStages.join(', ') || '无'}）` },
+            ])
+            break
+          case 'workflow_error':
+            setHistory((h) => [
+              ...h,
+              { role: 'assistant' as const, text: `\n❌ ${event.stage} 阶段错误: ${event.error}` },
+            ])
+            break
+        }
+      }
+    } catch (e) {
+      setHistory((h) => [
+        ...h,
+        { role: 'assistant' as const, text: `❌ 工作流失败: ${String(e)}` },
+      ])
+    } finally {
+      setRunning(false)
+      abortRef.current = null
+    }
+  }
+
   // v0.3: /init 生成 AGENTS.md / /agents 显示当前指令（异步命令）
   async function handleInstructionCommand(text: string): Promise<void> {
     if (text === '/init') {
@@ -500,6 +592,15 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         setInput('')
         return
       }
+      // v1.0 核心差异化：/workflow <需求> 自动走"理解→实现→验证→回顾"四阶段
+      if (text.startsWith('/workflow ')) {
+        const requirement = text.slice('/workflow '.length).trim()
+        if (requirement && !running) {
+          setInput('')
+          void runWorkflowTask(requirement)
+        }
+        return
+      }
       // v0.3: /init 生成 AGENTS.md 模板 / /agents 显示指令（异步命令）
       if (text === '/init' || text === '/agents' || text === '/instructions') {
         if (!running) {
@@ -529,6 +630,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
 /help — 显示此帮助
 /model [名] — 查看或切换模型
 /plan <需求> — 分析需求并产出实施计划（只读，不改文件）
+/workflow <需求> — ★ 自动走"理解→实现→验证→回顾"四阶段完整工作流
 /init — 生成 AGENTS.md 模板（项目级 agent 行为约定）
 /agents — 显示当前加载的 AGENTS.md 指令
 /sessions — 列出历史会话
@@ -617,7 +719,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             ? '等待权限确认...'
             : running
               ? '正在生成... Ctrl+C 中断当前轮次'
-              : 'Ctrl+C 退出 · /help 帮助 · /model 切换 · /plan 计划 · /cost 用量 · /clear 清空 · /exit 退出'}
+              : 'Ctrl+C 退出 · /help 帮助 · ★ /workflow 完整流程 · /plan 计划 · /model 切换 · /exit 退出'}
         </Text>
       </Box>
     </Box>

@@ -30,6 +30,8 @@ export const COMPACT_SYSTEM_PROMPT = `请把以下对话历史压缩成一份摘
 export interface CompactOpts {
   model: string
   apiKey?: string
+  /** M6：第三方 Anthropic 兼容 API 的 baseURL（透传给 streamAnthropic） */
+  apiBaseUrl?: string
   signal: AbortSignal
   /** 测试用：注入 mock streamAnthropic（与 queryLoop._llmOverride 同签名） */
   _llmOverride?: (opts: object) => AsyncGenerator<LlmEvent>
@@ -51,6 +53,7 @@ export async function compactConversation(
     messages,
     signal: opts.signal,
     apiKey: opts.apiKey,
+    ...(opts.apiBaseUrl ? { apiBaseUrl: opts.apiBaseUrl } : {}),
   }
 
   let summary = ''

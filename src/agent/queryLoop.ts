@@ -82,6 +82,8 @@ export interface QueryLoopOpts {
   maxTokens?: number
   signal: AbortSignal
   apiKey?: string
+  /** M6：第三方 Anthropic 兼容 API 的 baseURL（中转/代理） */
+  apiBaseUrl?: string
   /** M3：工作目录（工具执行需要） */
   cwd: string
   /** M3：可用工具列表（不传则禁用工具，退化为 M2 单轮） */
@@ -196,6 +198,7 @@ export async function* queryLoop(
         const summary = await compactConversation(messages, {
           model: opts.model,
           apiKey: opts.apiKey,
+          ...(opts.apiBaseUrl ? { apiBaseUrl: opts.apiBaseUrl } : {}),
           signal: opts.signal,
           _llmOverride: opts._llmOverride,
         }).catch(() => '')
@@ -243,6 +246,7 @@ export async function* queryLoop(
         maxTokens: opts.maxTokens,
         signal: opts.signal,
         apiKey: opts.apiKey,
+        ...(opts.apiBaseUrl ? { apiBaseUrl: opts.apiBaseUrl } : {}),
         systemCacheable: true, // M6: 启用 prompt cache，system 静态段跨轮命中
       }
       if (hasTools) {

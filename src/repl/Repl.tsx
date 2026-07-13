@@ -26,7 +26,12 @@ import type { SessionMeta } from '@/services/Session.js'
 
 export interface ReplProps {
   version?: string
-  modelName?: string
+  /** 初始模型（来自 config 或 CLI --model 覆盖） */
+  initialModel?: string
+  /** 初始 apiKey（来自 config 或 CLI --api-key 覆盖） */
+  initialApiKey?: string
+  /** 初始 apiBaseUrl（来自 config 或 CLI --api-base-url 覆盖） */
+  initialApiBaseUrl?: string
 }
 
 interface DisplayMessage {
@@ -42,7 +47,9 @@ interface PendingPermission {
   resolve: (d: PermissionUserDecision) => void
 }
 
-export function Repl({ version = '0.1.0', modelName }: ReplProps) {
+export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialApiBaseUrl }: ReplProps) {
+  // M6+: 当前模型（支持 /model 运行时切换）。初值来自 CLI flag > config
+  const [currentModel, setCurrentModel] = useState(initialModel ?? 'claude-sonnet-4-5-20250929')
   const { exit } = useApp()
   const [input, setInput] = useState('')
   const [history, setHistory] = useState<DisplayMessage[]>([])
@@ -59,6 +66,7 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
   const configRef = useRef<{
     model: string
     apiKey?: string
+    apiBaseUrl?: string
     maxTokens: number
     contextWindow: number
     permissionMode: PermissionMode
@@ -73,9 +81,11 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
   useEffect(() => {
     getConfig()
       .then((c) => {
+        // CLI flag > config（initialModel 已经在 App.tsx 做过 CLI>config 合并，这里优先用它）
         configRef.current = {
-          model: c.value.model,
-          apiKey: c.value.apiKey,
+          model: initialModel ?? c.value.model,
+          apiKey: initialApiKey ?? c.value.apiKey,
+          apiBaseUrl: initialApiBaseUrl ?? c.value.apiBaseUrl,
           maxTokens: c.value.maxTokens,
           contextWindow: c.value.contextWindow,
           permissionMode: c.value.permissionMode,
@@ -125,6 +135,7 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
         maxTokens: config.maxTokens,
         signal: ac.signal,
         apiKey: config.apiKey,
+        ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
         cwd: process.cwd(),
         tools: getAllTools(),
         // M4：传权限模式 + 规则给 queryLoop，工具执行前调 checkPermission
@@ -373,6 +384,31 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
         setInput('')
         return
       }
+      // M6+: /model 查看或切换模型（运行时生效，下次对话用新模型）
+      if (text === '/model') {
+        setHistory((h) => [
+          ...h,
+          {
+            role: 'assistant' as const,
+            text: `当前模型：${currentModel}\n\n切换：/model <模型名>\n常用：\n  claude-sonnet-4-5-20250929（默认，均衡）\n  claude-opus-4-1-20250805（强，贵）\n  claude-haiku-3-5（快，便宜）\n  或第三方兼容模型名`,
+          },
+        ])
+        setInput('')
+        return
+      }
+      if (text.startsWith('/model ')) {
+        const newModel = text.slice('/model '.length).trim()
+        if (newModel) {
+          setCurrentModel(newModel)
+          if (configRef.current) configRef.current.model = newModel
+          setHistory((h) => [
+            ...h,
+            { role: 'assistant' as const, text: `✓ 模型已切换为 ${newModel}（下次对话生效）` },
+          ])
+        }
+        setInput('')
+        return
+      }
       // M6: /help 显示命令列表
       if (text === '/help' || text === '/?') {
         setHistory((h) => [
@@ -383,6 +419,7 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
 /clear — 清空当前对话上下文
 /cost — 显示本次会话 token 用量
 /help — 显示此帮助
+/model [名] — 查看或切换模型
 /sessions — 列出历史会话
 /resume <N> — 恢复第 N 个历史会话
 /exit — 退出 fuckcode`,
@@ -422,7 +459,7 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
         <Text bold color="cyan">
           fuckcode <Text dimColor>v{version}</Text>
         </Text>
-        {modelName && <Text dimColor>模型: {modelName}</Text>}
+        {currentModel && <Text dimColor>模型: {currentModel}</Text>}
         <Text dimColor>原生中文交互的终端 AI 编码工具</Text>
       </Box>
 
@@ -463,7 +500,7 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
             ? '等待权限确认...'
             : running
               ? '正在生成... Ctrl+C 中断当前轮次'
-              : 'Ctrl+C 退出 · /help 帮助 · /cost 用量 · /clear 清空 · /sessions 历史 · /exit 退出'}
+              : 'Ctrl+C 退出 · /help 帮助 · /model 切换模型 · /cost 用量 · /clear 清空 · /exit 退出'}
         </Text>
       </Box>
     </Box>

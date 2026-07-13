@@ -40,9 +40,13 @@ bun run dev
 
 # 通过 bin 入口运行
 bun run start
+
+# 命令行临时覆盖配置（优先级：flag > 项目 config > 用户 config）
+bun run dev -- --model claude-opus-4-1-20250805
+bun run dev -- --api-base-url https://your-proxy.com/anthropic --api-key sk-xxx
 ```
 
-进入交互 REPL 后会看到欢迎框，输入文字回车即可对话（流式显示）。支持多轮上下文。`Ctrl+C` 在生成中中断当前轮次，空闲时退出程序。`/clear` 清空上下文，`/exit` 退出。
+进入交互 REPL 后会看到欢迎框，输入文字回车即可对话（流式显示）。支持多轮上下文。`Ctrl+C` 在生成中中断当前轮次，空闲时退出程序。`/model` 运行时切换模型，`/clear` 清空上下文，`/exit` 退出。
 
 ⚠️ fuckcode 需要交互式终端（TTY），不能在管道或重定向 stdin 下运行。
 
@@ -66,14 +70,18 @@ bun run start
   },
   "permissionMode": "default",
   "maxTokens": 8192,
-  "contextWindow": 200000
+  "contextWindow": 200000,
+  "apiBaseUrl": "https://your-proxy.example.com/anthropic"
 }
 ```
+
+> `apiBaseUrl` 可选，用于第三方 Anthropic 兼容中转（OpenRouter、国内代理等）。不填则直连 `https://api.anthropic.com`。也可走 `ANTHROPIC_BASE_URL` 环境变量。
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
 | `model` | `claude-sonnet-4-5-20250929` | 模型 ID（M2 接入 Anthropic） |
 | `apiKey` | — | Anthropic API Key，也可走 `ANTHROPIC_API_KEY` 环境变量 |
+| `apiBaseUrl` | — | 第三方兼容 API 的 baseURL（中转/代理），也可走 `ANTHROPIC_BASE_URL` 环境变量 |
 | `permissions.allow/ask/deny` | `[]` | 权限规则（M4 实现） |
 | `permissionMode` | `default` | `default` / `acceptEdits` / `plan` / `bypassPermissions` |
 | `maxTokens` | `8192` | 单次响应最大 token |

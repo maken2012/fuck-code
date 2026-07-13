@@ -81,7 +81,7 @@ function renderWithFrame(node: React.ReactNode) {
 
 test('Repl 渲染欢迎语和输入框', () => {
   const { lastFrame, unmount } = renderWithFrame(
-    <Repl version="0.1.0-test" modelName="claude-sonnet-4-5" />,
+    <Repl version="0.1.0-test" initialModel="claude-sonnet-4-5" />,
   )
   unmount()
   const frame = lastFrame() ?? ''
@@ -93,7 +93,7 @@ test('Repl 渲染欢迎语和输入框', () => {
 
 test('Repl 显示快捷键提示', () => {
   const { lastFrame, unmount } = renderWithFrame(
-    <Repl version="0.1.0" modelName="m" />,
+    <Repl version="0.1.0" initialModel="m" />,
   )
   unmount()
   const frame = lastFrame() ?? ''

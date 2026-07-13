@@ -11,6 +11,7 @@ import { configPath } from '@/services/Paths.js'
 export const ConfigSchema = z.object({
   model: z.string().default('claude-sonnet-4-5-20250929'),
   apiKey: z.string().optional(),
+  apiBaseUrl: z.string().optional().describe('Anthropic 兼容 API 的 baseURL（第三方中转/代理）'),
   permissions: z
     .object({
       allow: z.array(z.string()).default([]),

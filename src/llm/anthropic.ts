@@ -33,6 +33,8 @@ export interface StreamAnthropicOpts {
   maxTokens?: number
   signal: AbortSignal
   apiKey?: string
+  /** M6：第三方 Anthropic 兼容 API 的 baseURL（中转/代理），如 https://api.openrouter.ai/anthropic */
+  apiBaseUrl?: string
   /** M3：Anthropic tools API 格式的工具定义数组 */
   tools?: object[]
   /** M6：启用 prompt cache（system 静态段 + 末条 user message 加 cache_control） */
@@ -102,9 +104,13 @@ export async function* streamAnthropic(
 ): AsyncGenerator<LlmEvent> {
   // 构造 client（测试时用 override）。SDK 的 Anthropic 与 MockClient 在结构上
   // create 签名不协变，但运行时调用兼容，统一转成 MockClient 形态调用。
+  // apiBaseUrl 支持第三方 Anthropic 兼容中转（OpenRouter、国内代理等）。
   const client: MockClient =
     opts._clientOverride ??
-    (new Anthropic({ apiKey: opts.apiKey }) as unknown as MockClient)
+    (new Anthropic({
+      apiKey: opts.apiKey,
+      ...(opts.apiBaseUrl ? { baseURL: opts.apiBaseUrl } : {}),
+    }) as unknown as MockClient)
   // 构造 messages.create body。tools 仅在有值时附加（空数组会让 API 报错）。
   // M6: systemCacheable 时 system 用 TextBlockParam 数组 + cache_control（静态段稳定后跨轮命中 cache）
   const body: Record<string, unknown> = {

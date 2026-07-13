@@ -10,13 +10,21 @@ const program = new Command()
   .version(VERSION)
   .argument('[prompt]', '可选的一次性提示（v0.2 支持）')
   .option('-v, --verbose', '启用详细日志输出', false)
+  .option('-m, --model <model>', '覆盖 config.json 的 model（如 claude-sonnet-4-5-20250929）')
+  .option('--api-key <key>', '覆盖 config.json 的 apiKey（建议用环境变量）')
+  .option('--api-base-url <url>', '覆盖 config.json 的 apiBaseUrl（第三方兼容中转）')
   .action(async (prompt, opts) => {
     // M1: 无论参数如何，都进 REPL
     // M2 会在这里分流：有 prompt → 一次性模式；无 prompt → REPL
     if (prompt) {
       console.error(`[M1] 一次性模式将在 M2 支持，本次忽略提示，进入交互模式。`)
     }
-    await startRepl({ verbose: opts.verbose })
+    await startRepl({
+      verbose: opts.verbose,
+      modelOverride: opts.model,
+      apiKeyOverride: opts.apiKey,
+      apiBaseUrlOverride: opts.apiBaseUrl,
+    })
   })
 
 // 解析 argv 并启动。供 bin 入口（bin/fuckcode.js）和直接运行（bun run src/cli.tsx）共用。

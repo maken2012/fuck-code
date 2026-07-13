@@ -2,6 +2,7 @@
 // CLI 参数解析入口。M1 只支持交互式 REPL；print-and-exit 模式留 M2。
 import { Command } from '@commander-js/extra-typings'
 import { VERSION, NAME } from '@/version.js'
+import { startRepl } from '@/repl/App.js'
 
 const program = new Command()
   .name(NAME)
@@ -15,12 +16,6 @@ const program = new Command()
     if (prompt) {
       console.error(`[M1] 一次性模式将在 M2 支持，本次忽略提示，进入交互模式。`)
     }
-    // 动态 import：避免顶层依赖未实现的模块（@/repl/App.js 要到 Task 9 才创建），
-    // 让 Task 5 阶段 typecheck 能通过。Task 9 实现 App 后可改回静态 import。
-    // 注：直接写字面量 '@/repl/App.js' 会被 tsc 模块解析器抓到 TS2307，
-    // 因此用动态拼路径绕过（module: 'ESNext' + dynamic import 在运行时由 Bun 解析）。
-    const replModule = './repl/App.js'
-    const { startRepl } = await import(replModule)
     await startRepl({ verbose: opts.verbose })
   })
 

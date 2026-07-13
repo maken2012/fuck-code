@@ -47,6 +47,9 @@ export async function* queryLoop(
   const tools = opts.tools ?? []
   const hasTools = tools.length > 0
 
+  // M4：跨工具共享的已读文件状态（Read 写入；Edit/Write 执行前校验）
+  const readFileState = new Map<string, { mtime: number; readAt: number }>()
+
   // 内部消息数组：复制 history + 加本次 user 输入。
   // history 的 content 在 M2 是 string；queryLoop 内部可能产生结构化数组。
   const messages: ChatMessage[] = [
@@ -164,6 +167,7 @@ export async function* queryLoop(
         const result = await tool.execute(tu.input, {
           cwd: opts.cwd,
           abortSignal: opts.signal,
+          readFileState,
         })
         const content = result.ok
           ? (tool.formatResult

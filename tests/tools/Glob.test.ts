@@ -6,7 +6,11 @@ import { resolve } from 'node:path'
 import { GlobTool } from '@/tools/Glob.js'
 
 const tmpDir = resolve(process.env.TMPDIR || '/tmp', 'fc-glob-test-' + process.pid)
-const ctx = { cwd: tmpDir, abortSignal: new AbortController().signal }
+const ctx = {
+  cwd: tmpDir,
+  abortSignal: new AbortController().signal,
+  readFileState: new Map<string, { mtime: number; readAt: number }>(),
+}
 
 beforeEach(async () => {
   await mkdir(tmpDir, { recursive: true })

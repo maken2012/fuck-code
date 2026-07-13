@@ -6,7 +6,11 @@ import { resolve } from 'node:path'
 import { ReadTool } from '@/tools/Read.js'
 
 const tmpDir = resolve(process.env.TMPDIR || '/tmp', 'fc-read-test-' + process.pid)
-const ctx = { cwd: tmpDir, abortSignal: new AbortController().signal }
+const ctx = {
+  cwd: tmpDir,
+  abortSignal: new AbortController().signal,
+  readFileState: new Map<string, { mtime: number; readAt: number }>(),
+}
 
 beforeEach(async () => {
   await mkdir(tmpDir, { recursive: true })
@@ -81,4 +85,22 @@ test('读目录返回错误', async () => {
 test('isReadOnly 和 isConcurrencySafe 都是 true', () => {
   expect(ReadTool.isReadOnly?.()).toBe(true)
   expect(ReadTool.isConcurrencySafe?.()).toBe(true)
+})
+
+test('读完后更新 readFileState（记录 mtime + readAt，供 Edit/Write 校验）', async () => {
+  const filePath = resolve(tmpDir, 'stateful.ts')
+  await writeFile(filePath, 'export const x = 1\n')
+  const localCtx = {
+    cwd: tmpDir,
+    abortSignal: new AbortController().signal,
+    readFileState: new Map<string, { mtime: number; readAt: number }>(),
+  }
+  await ReadTool.execute({ file_path: filePath }, localCtx)
+  const state = localCtx.readFileState.get(filePath)
+  expect(state).toBeDefined()
+  if (state) {
+    expect(typeof state.mtime).toBe('number')
+    expect(state.mtime).toBeGreaterThan(0)
+    expect(state.readAt).toBeLessThanOrEqual(Date.now())
+  }
 })

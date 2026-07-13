@@ -39,7 +39,7 @@ export const ReadTool = buildTool<ReadInputType>({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  async execute(input) {
+  async execute(input, ctx) {
     try {
       const stats = await stat(input.file_path)
       if (!stats.isFile()) {
@@ -64,6 +64,12 @@ export const ReadTool = buildTool<ReadInputType>({
       const totalLines = lines.length
       const shownRange = `${start + 1}-${end}`
       const summary = `\n（共 ${totalLines} 行，显示 ${shownRange}）`
+
+      // M4：记录已读状态（mtime + readAt），供 Edit/Write 写前校验"已读且未被外部修改"
+      ctx.readFileState.set(input.file_path, {
+        mtime: stats.mtimeMs,
+        readAt: Date.now(),
+      })
 
       return { ok: true, data: numbered + summary }
     } catch (e) {

@@ -8,7 +8,7 @@ const program = new Command()
   .name(NAME)
   .description('原生中文交互的终端 AI 编码工具')
   .version(VERSION)
-  .argument('[prompt]', '可选的一次性提示（M1 暂不支持，留 M2）')
+  .argument('[prompt]', '可选的一次性提示（v0.2 支持）')
   .option('-v, --verbose', '启用详细日志输出', false)
   .action(async (prompt, opts) => {
     // M1: 无论参数如何，都进 REPL

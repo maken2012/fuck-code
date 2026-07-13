@@ -9,10 +9,19 @@ import { WriteTool } from '@/tools/Write.js'
 import { EditTool } from '@/tools/Edit.js'
 import { BashTool } from '@/tools/Bash.js'
 import { TaskTool } from '@/tools/Task.js'
+import { TodoWriteTool } from '@/tools/TodoWrite.js'
+import { WebSearchTool } from '@/tools/WebSearch.js'
+import { WebFetchTool } from '@/tools/WebFetch.js'
 
-// 所有内置工具（只读三件套 + 写工具三件套 + v0.2c Task 子 agent）
+// 所有内置工具
 export function getAllTools(): Tool[] {
-  return [ReadTool, GlobTool, GrepTool, WriteTool, EditTool, BashTool, TaskTool]
+  return [
+    ReadTool, GlobTool, GrepTool,           // 只读
+    WriteTool, EditTool, BashTool,          // 写
+    TaskTool,                               // 子 agent
+    TodoWriteTool,                          // v1.1 任务跟踪
+    WebSearchTool, WebFetchTool,            // v1.1 网络工具
+  ]
 }
 
 // 按名字查找工具

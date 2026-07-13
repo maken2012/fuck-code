@@ -447,9 +447,15 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
       setInput((s) => s.slice(0, -1))
       return
     }
-    // 普通字符（忽略 ctrl/meta 组合）
-    if (!key.ctrl && !key.meta && inputChar && inputChar.length === 1) {
-      setInput((s) => s + inputChar)
+    // 普通文本输入（支持中文 IME 一次提交多个字符 + 粘贴）
+    // 原先 length === 1 会拒绝 IME 提交的"你好"（长度 2），导致中文只能逐字输入。
+    // 改为：只要不是 ctrl/meta 组合、且至少含一个非控制字符，就追加。
+    if (!key.ctrl && !key.meta && inputChar) {
+      // 过滤纯控制字符（如孤立的 \x1b Esc），但保留所有可见文本（含中文/emoji）
+      const hasVisible = /\S/.test(inputChar) && !/^\x1b+$/.test(inputChar)
+      if (hasVisible) {
+        setInput((s) => s + inputChar)
+      }
     }
   })
 

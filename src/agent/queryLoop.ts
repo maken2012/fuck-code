@@ -39,6 +39,7 @@ import {
   writeCompactBoundary,
 } from '@/services/Session.js'
 import { estimateMessagesTokens } from '@/utils/tokens.js'
+import { microCompactMessages } from '@/agent/microCompact.js'
 import {
   compactConversation,
   getCompactThreshold,
@@ -202,6 +203,14 @@ export async function* queryLoop(
 
   try {
     for (let turn = 1; turn <= MAX_TURNS; turn++) {
+      // v1.5: microCompact——先做细粒度回收（替换旧的大工具结果）
+      // 比 autoCompact（全量摘要）更省且保护 cache 前缀
+      if (opts.sessionId) {
+        const replaced = microCompactMessages(messages)
+        if (replaced > 0) {
+          yield { type: 'compacted', summary: `microCompact: 替换了 ${replaced} 个旧工具结果` }
+        }
+      }
       // M5：每轮调 LLM 前检查 token 是否超阈值 → 触发压缩。
       // 用 estimateMessagesTokens 粗估；超阈值就 compactConversation 生成摘要。
       if (

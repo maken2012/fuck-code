@@ -5,6 +5,7 @@
 // v0.3: AGENTS.md 指令文件注入（项目级行为约定）。
 import type { Tool } from '@/tools/Tool.js'
 import { loadInstructions } from '@/instruction/agentsMd.js'
+import { loadMemories, formatMemoriesForPrompt } from '@/instruction/memory.js'
 
 export interface BuildSystemPromptOpts {
   /** M3：可用工具列表。每个工具的 prompt 会拼进 system prompt 末尾。 */
@@ -59,11 +60,15 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
   const instructions = await getInstructions()
   const instructionSection = instructions ? `\n\n# 项目指令（AGENTS.md）\n以下指令由项目提供，优先级高于上面的默认约定：\n\n${instructions}` : ''
 
+  // v1.5: 记忆注入（跨会话持久化的偏好/约定）
+  const memories = await loadMemories(process.cwd()).catch(() => [])
+  const memorySection = formatMemoriesForPrompt(memories)
+
   const toolSection = opts?.tools && opts.tools.length > 0
     ? `\n\n# 可用工具\n\n${opts.tools
         .map((t) => `## ${t.name}\n\n${t.prompt}`)
         .join('\n\n')}`
     : ''
 
-  return base + instructionSection + toolSection
+  return base + instructionSection + memorySection + toolSection
 }

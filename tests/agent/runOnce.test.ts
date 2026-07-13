@@ -111,3 +111,22 @@ test('runOnce --plan 强制 plan 模式', async () => {
   })
   expect(capturedMode).toBe('plan')
 })
+
+test('plan 模式：system prompt 含计划指令，prompt 加引导前缀', async () => {
+  let capturedSystem = ''
+  let capturedInput = ''
+  const { runOnce } = await import('@/agent/runOnce.js')
+  await runOnce({
+    prompt: '加个登录功能',
+    permissionMode: 'plan',
+    _queryLoopOverride: async function* (opts: object) {
+      const o = opts as { system: string; userInput: string }
+      capturedSystem = o.system
+      capturedInput = o.userInput
+      yield { type: 'done' }
+    },
+  })
+  expect(capturedSystem).toContain('PLAN（计划）模式')
+  expect(capturedInput).toContain('加个登录功能')
+  expect(capturedInput).toContain('产出一份实施计划')
+})

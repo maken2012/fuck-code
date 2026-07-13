@@ -13,6 +13,7 @@ import { Box, Text, useInput, useApp } from 'ink'
 import type { ChatMessage } from '@/llm/types.js'
 import { queryLoop } from '@/agent/queryLoop.js'
 import { buildSystemPrompt } from '@/agent/systemPrompt.js'
+import { PLAN_MODE_INSTRUCTION } from '@/agent/planPrompt.js'
 import { getAllTools } from '@/tools/registry.js'
 import { getConfig } from '@/services/runtime.js'
 import type { PermissionMode } from '@/permissions/modes.js'
@@ -261,6 +262,62 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     }
   }
 
+  // v0.2b: /plan <需求> —— 用 plan 模式分析需求，产出实施计划（只读，不改文件）
+  // 与 runQuery 区别：permissionMode='plan'（写工具被 deny）+ 叠加计划指令 system prompt
+  async function runPlan(requirement: string) {
+    const config = configRef.current ?? { model: 'claude-sonnet-4-5-20250929', maxTokens: 8192, contextWindow: 200000, permissionMode: 'default' as const, permissions: { allow: [], ask: [], deny: [] } }
+    const ac = new AbortController()
+    abortRef.current = ac
+    setRunning(true)
+    let planText = ''
+    setHistory((h) => [
+      ...h,
+      { role: 'user' as const, text: `📋 [计划模式] ${requirement}` },
+      { role: 'assistant' as const, text: '' },
+    ])
+    try {
+      const planSystem = buildSystemPrompt({ tools: getAllTools() }) + PLAN_MODE_INSTRUCTION
+      for await (const event of queryLoop({
+        history: [],
+        userInput: `请为以下需求产出一份实施计划：\n\n${requirement}`,
+        model: currentModel,
+        system: planSystem,
+        maxTokens: config.maxTokens,
+        signal: ac.signal,
+        apiKey: config.apiKey,
+        ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+        cwd: process.cwd(),
+        tools: getAllTools(),
+        permissionMode: 'plan', // 只读，写工具被 deny
+        permissions: config.permissions,
+        sessionId: sessionId ?? undefined,
+        contextWindow: config.contextWindow,
+      })) {
+        if (event.type === 'text_delta') {
+          planText += event.text
+          setHistory((h) => {
+            const copy = [...h]
+            copy[copy.length - 1] = { role: 'assistant' as const, text: planText }
+            return copy
+          })
+        } else if (event.type === 'usage') {
+          totalTokensRef.current.input += event.input
+          totalTokensRef.current.output += event.output
+          totalTokensRef.current.cacheRead += event.cacheRead
+        }
+      }
+    } catch (e) {
+      setHistory((h) => {
+        const copy = [...h]
+        copy[copy.length - 1] = { role: 'assistant' as const, text: `❌ 计划失败: ${String(e)}` }
+        return copy
+      })
+    } finally {
+      setRunning(false)
+      abortRef.current = null
+    }
+  }
+
   // M5：/sessions 与 /resume 命令（异步，useInput 回调本身不能 await）。
   // - /sessions：列出最近 5 个会话（倒序，最近在前），存到 sessionsListRef
   // - /resume [N]：取 sessionsListRef 第 N 项恢复 —— loadMessages 替换 chatHistoryRef
@@ -409,6 +466,15 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         setInput('')
         return
       }
+      // v0.2b: /plan <需求> 用 plan 模式分析需求产出实施计划（只读，不改文件）
+      if (text.startsWith('/plan ')) {
+        const requirement = text.slice('/plan '.length).trim()
+        if (requirement && !running) {
+          setInput('')
+          void runPlan(requirement)
+        }
+        return
+      }
       // M6: /help 显示命令列表
       if (text === '/help' || text === '/?') {
         setHistory((h) => [
@@ -420,6 +486,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
 /cost — 显示本次会话 token 用量
 /help — 显示此帮助
 /model [名] — 查看或切换模型
+/plan <需求> — 分析需求并产出实施计划（只读，不改文件）
 /sessions — 列出历史会话
 /resume <N> — 恢复第 N 个历史会话
 /exit — 退出 fuckcode`,
@@ -506,7 +573,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             ? '等待权限确认...'
             : running
               ? '正在生成... Ctrl+C 中断当前轮次'
-              : 'Ctrl+C 退出 · /help 帮助 · /model 切换模型 · /cost 用量 · /clear 清空 · /exit 退出'}
+              : 'Ctrl+C 退出 · /help 帮助 · /model 切换 · /plan 计划 · /cost 用量 · /clear 清空 · /exit 退出'}
         </Text>
       </Box>
     </Box>

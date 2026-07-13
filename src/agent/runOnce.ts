@@ -9,6 +9,8 @@
 // - 支持 stdin 管道（追加到 prompt）
 import { queryLoop } from '@/agent/queryLoop.js'
 import { buildSystemPrompt } from '@/agent/systemPrompt.js'
+import { PLAN_MODE_INSTRUCTION } from '@/agent/planPrompt.js'
+import type { QueryEvent } from '@/agent/types.js'
 import { getAllTools } from '@/tools/registry.js'
 import { getConfig } from '@/services/runtime.js'
 import { createSession } from '@/services/Session.js'
@@ -23,7 +25,7 @@ export interface RunOnceOpts {
   /** 非交互模式默认 acceptEdits（允许写操作不弹窗）；用 bypassPermissions 跳过所有检查 */
   permissionMode?: PermissionMode
   /** 测试用：注入 mock queryLoop（生产代码不传） */
-  _queryLoopOverride?: (opts: object) => AsyncGenerator<object>
+  _queryLoopOverride?: (opts: object) => AsyncGenerator<QueryEvent>
 }
 
 export async function runOnce(opts: RunOnceOpts): Promise<void> {
@@ -62,14 +64,20 @@ export async function runOnce(opts: RunOnceOpts): Promise<void> {
 
   process.stderr.write(`\x1b[2m模型: ${model} · 模式: ${permissionMode}\x1b[0m\n`)
 
-  const queryLoopFn = opts._queryLoopOverride ?? (queryLoop as (o: object) => AsyncGenerator<object>)
+  // plan 模式：叠加计划指令到 system prompt，并在 prompt 前加引导
+  const isPlan = permissionMode === 'plan'
+  const baseSystem = buildSystemPrompt({ tools: getAllTools() })
+  const system = isPlan ? baseSystem + PLAN_MODE_INSTRUCTION : baseSystem
+  const guidedPrompt = isPlan ? `请为以下需求产出一份实施计划：\n\n${fullPrompt}` : fullPrompt
+
+  const queryLoopFn = opts._queryLoopOverride ?? (queryLoop as unknown as (o: object) => AsyncGenerator<QueryEvent>)
 
   try {
     for await (const event of queryLoopFn({
       history: [],
-      userInput: fullPrompt,
+      userInput: guidedPrompt,
       model,
-      system: buildSystemPrompt({ tools: getAllTools() }),
+      system,
       maxTokens: config?.value.maxTokens ?? 8192,
       signal: ac.signal,
       apiKey,

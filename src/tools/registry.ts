@@ -12,6 +12,7 @@ import { TaskTool } from '@/tools/Task.js'
 import { TodoWriteTool } from '@/tools/TodoWrite.js'
 import { WebSearchTool } from '@/tools/WebSearch.js'
 import { WebFetchTool } from '@/tools/WebFetch.js'
+import { AskUserQuestionTool } from '@/tools/AskUserQuestion.js'
 import { loadDynamicTools } from '@/tools/dynamicLoader.js'
 
 // 所有内置工具
@@ -22,6 +23,7 @@ export function getAllTools(): Tool[] {
     TaskTool,                               // 子 agent
     TodoWriteTool,                          // v1.1 任务跟踪
     WebSearchTool, WebFetchTool,            // v1.1 网络工具
+    AskUserQuestionTool,                    // v1.2 结构化提问
   ]
 }
 

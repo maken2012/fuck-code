@@ -59,6 +59,9 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const [currentModel, setCurrentModel] = useState(initialModel ?? 'claude-sonnet-4-5-20250929')
   const { exit } = useApp()
   const [input, setInput] = useState('')
+  // v1.2: 输入历史（↑↓ 浏览）
+  const inputHistoryRef = useRef<string[]>([])
+  const historyIndexRef = useRef<number>(-1) // -1 表示当前输入，>=0 表示浏览历史第 N 项
   const [history, setHistory] = useState<DisplayMessage[]>([])
   const [running, setRunning] = useState(false)
   const [configLoaded, setConfigLoaded] = useState(false)
@@ -683,8 +686,41 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         }
       }
       if (text && !running) {
+        // v1.2: 存入输入历史（去重连续相同项）
+        const hist = inputHistoryRef.current
+        if (hist[hist.length - 1] !== text) {
+          hist.push(text)
+          if (hist.length > 100) hist.shift() // 最多 100 条
+        }
+        historyIndexRef.current = -1
         setInput('')
         void runQuery(text)
+      }
+      return
+    }
+    // v1.2: ↑↓ 浏览输入历史
+    if (key.upArrow) {
+      const history = inputHistoryRef.current
+      if (history.length > 0) {
+        if (historyIndexRef.current === -1) {
+          historyIndexRef.current = history.length - 1
+        } else {
+          historyIndexRef.current = Math.max(0, historyIndexRef.current - 1)
+        }
+        setInput(history[historyIndexRef.current] ?? '')
+      }
+      return
+    }
+    if (key.downArrow) {
+      const history = inputHistoryRef.current
+      if (historyIndexRef.current >= 0) {
+        historyIndexRef.current++
+        if (historyIndexRef.current >= history.length) {
+          historyIndexRef.current = -1 // 回到当前输入
+          setInput('')
+        } else {
+          setInput(history[historyIndexRef.current] ?? '')
+        }
       }
       return
     }

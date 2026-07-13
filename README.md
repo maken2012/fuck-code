@@ -2,7 +2,7 @@
 
 > 原生中文交互的终端 AI 编码工具。目标是从需求到开发测试的完整流程都能在一个工具里完成。
 
-**当前状态：M2 LLM + 基础 loop（v0.1.0）** — 已接入 Anthropic 流式对话，多轮上下文，Ctrl+C 中断。工具系统在后续里程碑。
+**当前状态：M3 工具系统（v0.1.0）** — 已接入只读工具（Read/Glob/Grep），模型可读取代码。写工具与权限在后续里程碑。
 
 ## 快速开始
 
@@ -122,7 +122,7 @@ bun run dev           # 启动 REPL
 |--------|------|------|
 | **M1 骨架** | Bun 工程 + Effect runtime + Ink REPL + Config/Logger | ✅ |
 | **M2 LLM + loop** | Anthropic 流式 + queryLoop + 多轮上下文 + abort | ✅ |
-| M3 工具系统 | Tool 接口 + Read/Glob/Grep | ⬜ |
+| **M3 工具系统** | Tool 接口 + Read/Glob/Grep + queryLoop 工具循环 | ✅ |
 | M4 写工具 + 权限 | Write/Edit/Bash + 权限决策管线 | ⬜ |
 | M5 会话 + 压缩 | JSONL 存储 + autoCompact | ⬜ |
 | M6 打磨发布 | prompt cache + 斜杠命令 + 错误处理 | ⬜ |

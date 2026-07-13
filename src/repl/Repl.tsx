@@ -17,6 +17,7 @@ import { PLAN_MODE_INSTRUCTION } from '@/agent/planPrompt.js'
 import { runWorkflow } from '@/agent/workflow.js'
 import type { WorkflowStage } from '@/agent/workflow.js'
 import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
+import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { getAllTools } from '@/tools/registry.js'
@@ -413,6 +414,28 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     }
   }
 
+  // v1.1: 自定义斜杠命令（.fuckcode/commands/*.md）
+  async function handleCustomCommand(name: string, args: string): Promise<void> {
+    const commands = await loadCustomCommands(process.cwd())
+    const cmd = commands.find((c) => c.name === name)
+    if (!cmd) {
+      setHistory((h) => [
+        ...h,
+        { role: 'assistant' as const, text: `未知命令: /${name}\n输入 /help 查看内置命令，或在 .fuckcode/commands/ 创建 ${name}.md 自定义。` },
+      ])
+      return
+    }
+    const prompt = renderTemplate(cmd.template, args)
+    // 如果命令指定了 model，临时切换
+    if (cmd.model && cmd.model !== currentModel) {
+      setCurrentModel(cmd.model)
+      if (configRef.current) configRef.current.model = cmd.model
+    }
+    // 当作普通 query 跑
+    setHistory((h) => [...h, { role: 'user' as const, text: `/${name}${args ? ' ' + args : ''}` }])
+    void runQuery(prompt)
+  }
+
   // v0.3: /init 生成 AGENTS.md / /agents 显示当前指令（异步命令）
   async function handleInstructionCommand(text: string): Promise<void> {
     if (text === '/init') {
@@ -648,6 +671,16 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           void handleSessionCommand(text)
         }
         return
+      }
+      // v1.1: 自定义斜杠命令（.fuckcode/commands/*.md）——未知 /xxx 时查自定义命令
+      if (text.startsWith('/') && !text.startsWith('/ ')) {
+        const cmdName = text.slice(1).split(/\s+/)[0] ?? ''
+        const cmdArgs = text.slice(1 + cmdName.length).trim()
+        if (cmdName && !running) {
+          setInput('')
+          void handleCustomCommand(cmdName, cmdArgs)
+          return
+        }
       }
       if (text && !running) {
         setInput('')

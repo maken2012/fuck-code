@@ -12,6 +12,7 @@ import { TaskTool } from '@/tools/Task.js'
 import { TodoWriteTool } from '@/tools/TodoWrite.js'
 import { WebSearchTool } from '@/tools/WebSearch.js'
 import { WebFetchTool } from '@/tools/WebFetch.js'
+import { loadDynamicTools } from '@/tools/dynamicLoader.js'
 
 // 所有内置工具
 export function getAllTools(): Tool[] {
@@ -22,6 +23,16 @@ export function getAllTools(): Tool[] {
     TodoWriteTool,                          // v1.1 任务跟踪
     WebSearchTool, WebFetchTool,            // v1.1 网络工具
   ]
+}
+
+// v1.1: 内置工具 + 动态加载（.fuckcode/tools/*.ts）
+// 动态工具按名字去重（内置优先）
+export async function getAllToolsAsync(cwd: string): Promise<Tool[]> {
+  const builtin = getAllTools()
+  const dynamic = await loadDynamicTools(cwd)
+  const builtinNames = new Set(builtin.map((t) => t.name))
+  const deduped = dynamic.filter((t) => !builtinNames.has(t.name))
+  return [...builtin, ...deduped]
 }
 
 // 按名字查找工具

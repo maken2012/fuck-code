@@ -7,6 +7,7 @@ import { Box, Text, useInput, useApp } from 'ink'
 import type { ChatMessage } from '@/llm/types.js'
 import { queryLoop } from '@/agent/queryLoop.js'
 import { buildSystemPrompt } from '@/agent/systemPrompt.js'
+import { getAllTools } from '@/tools/registry.js'
 import { getConfig } from '@/services/runtime.js'
 
 export interface ReplProps {
@@ -74,10 +75,12 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
         history: chatHistoryRef.current,
         userInput: text,
         model: config.model,
-        system: buildSystemPrompt(),
+        system: buildSystemPrompt({ tools: getAllTools() }),
         maxTokens: config.maxTokens,
         signal: ac.signal,
         apiKey: config.apiKey,
+        cwd: process.cwd(),
+        tools: getAllTools(),
       })) {
         switch (event.type) {
           case 'text_delta':
@@ -88,13 +91,38 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
               return copy
             })
             break
+          case 'tool_use_start': {
+            // 渲染"📖 调用 {tool}"提示（input 截断到 80 字符避免刷屏）
+            const inputStr = JSON.stringify(event.input) ?? ''
+            const note = `📖 调用 ${event.tool}: ${inputStr.slice(0, 80)}`
+            setHistory((h) => [
+              ...h,
+              { role: 'assistant', text: note },
+            ])
+            break
+          }
+          case 'tool_result': {
+            const note = event.ok
+              ? `✓ ${event.tool} 完成`
+              : `✗ ${event.tool} 失败: ${event.content}`
+            setHistory((h) => [
+              ...h,
+              { role: 'assistant', text: note },
+            ])
+            break
+          }
           case 'turn_end':
-            // 存入真实历史（用于下轮 LLM 上下文）
-            chatHistoryRef.current = [
-              ...chatHistoryRef.current,
-              { role: 'user', content: text },
-              { role: 'assistant', content: assistantText },
-            ]
+            // 只在最终轮（非 tool_use）把本轮对话存入历史。
+            // 工具调用中间轮（stopReason='tool_use'）不存——避免重复 push
+            // 和跨轮文本累积污染。queryLoop 内部用完整结构化 messages，
+            // Repl 历史只存文本摘要（M2 兼容）。
+            if (event.stopReason !== 'tool_use') {
+              chatHistoryRef.current = [
+                ...chatHistoryRef.current,
+                { role: 'user', content: text },
+                { role: 'assistant', content: assistantText },
+              ]
+            }
             break
           case 'aborted':
             if (assistantText) {
@@ -106,14 +134,13 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
             }
             break
           case 'error':
-            setHistory((h) => {
-              const copy = [...h]
-              copy[copy.length - 1] = {
+            setHistory((h) => [
+              ...h,
+              {
                 role: 'assistant',
                 text: `❌ 错误: ${event.error.message}`,
-              }
-              return copy
-            })
+              },
+            ])
             break
           case 'done':
             break

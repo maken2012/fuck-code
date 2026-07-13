@@ -95,7 +95,7 @@ export const TaskTool = buildTool<TaskInputType>({
 
     // 子 agent 的 system prompt
     const subSystem =
-      buildSystemPrompt({ tools: subTools }) + '\n\n' + SUBAGENT_SYSTEM_PREFIX
+      (await buildSystemPrompt({ tools: subTools })) + '\n\n' + SUBAGENT_SYSTEM_PREFIX
 
     try {
       let subResult = ''

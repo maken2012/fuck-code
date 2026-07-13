@@ -66,7 +66,7 @@ export async function runOnce(opts: RunOnceOpts): Promise<void> {
 
   // plan 模式：叠加计划指令到 system prompt，并在 prompt 前加引导
   const isPlan = permissionMode === 'plan'
-  const baseSystem = buildSystemPrompt({ tools: getAllTools() })
+  const baseSystem = await buildSystemPrompt({ tools: getAllTools() })
   const system = isPlan ? baseSystem + PLAN_MODE_INSTRUCTION : baseSystem
   const guidedPrompt = isPlan ? `请为以下需求产出一份实施计划：\n\n${fullPrompt}` : fullPrompt
 

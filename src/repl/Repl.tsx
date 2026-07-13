@@ -14,6 +14,9 @@ import type { ChatMessage } from '@/llm/types.js'
 import { queryLoop } from '@/agent/queryLoop.js'
 import { buildSystemPrompt } from '@/agent/systemPrompt.js'
 import { PLAN_MODE_INSTRUCTION } from '@/agent/planPrompt.js'
+import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
+import { writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { getAllTools } from '@/tools/registry.js'
 import { getConfig } from '@/services/runtime.js'
 import type { PermissionMode } from '@/permissions/modes.js'
@@ -132,7 +135,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         history: chatHistoryRef.current,
         userInput: text,
         model: config.model,
-        system: buildSystemPrompt({ tools: getAllTools() }),
+        system: await buildSystemPrompt({ tools: getAllTools() }),
         maxTokens: config.maxTokens,
         signal: ac.signal,
         apiKey: config.apiKey,
@@ -276,7 +279,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
       { role: 'assistant' as const, text: '' },
     ])
     try {
-      const planSystem = buildSystemPrompt({ tools: getAllTools() }) + PLAN_MODE_INSTRUCTION
+      const planSystem = (await buildSystemPrompt({ tools: getAllTools() })) + PLAN_MODE_INSTRUCTION
       for await (const event of queryLoop({
         history: [],
         userInput: `请为以下需求产出一份实施计划：\n\n${requirement}`,
@@ -316,6 +319,37 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
       setRunning(false)
       abortRef.current = null
     }
+  }
+
+  // v0.3: /init 生成 AGENTS.md / /agents 显示当前指令（异步命令）
+  async function handleInstructionCommand(text: string): Promise<void> {
+    if (text === '/init') {
+      const targetPath = resolve(process.cwd(), 'AGENTS.md')
+      try {
+        await writeFile(targetPath, generateTemplate(process.cwd()), 'utf8')
+        setHistory((h) => [
+          ...h,
+          { role: 'assistant' as const, text: `✓ 已生成 ${targetPath}\n编辑它来约定 agent 在本项目的行为，提交 git 让全团队共享。` },
+        ])
+      } catch (e) {
+        setHistory((h) => [
+          ...h,
+          { role: 'assistant' as const, text: `❌ 生成失败: ${String(e)}` },
+        ])
+      }
+      return
+    }
+    // /agents /instructions
+    const instr = await loadInstructions(process.cwd())
+    setHistory((h) => [
+      ...h,
+      {
+        role: 'assistant' as const,
+        text: instr
+          ? `当前加载的 AGENTS.md 指令：\n\n${instr.slice(0, 2000)}${instr.length > 2000 ? '\n...（截断）' : ''}`
+          : '未找到 AGENTS.md。用 /init 生成模板。',
+      },
+    ])
   }
 
   // M5：/sessions 与 /resume 命令（异步，useInput 回调本身不能 await）。
@@ -466,6 +500,14 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         setInput('')
         return
       }
+      // v0.3: /init 生成 AGENTS.md 模板 / /agents 显示指令（异步命令）
+      if (text === '/init' || text === '/agents' || text === '/instructions') {
+        if (!running) {
+          setInput('')
+          void handleInstructionCommand(text)
+        }
+        return
+      }
       // v0.2b: /plan <需求> 用 plan 模式分析需求产出实施计划（只读，不改文件）
       if (text.startsWith('/plan ')) {
         const requirement = text.slice('/plan '.length).trim()
@@ -487,6 +529,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
 /help — 显示此帮助
 /model [名] — 查看或切换模型
 /plan <需求> — 分析需求并产出实施计划（只读，不改文件）
+/init — 生成 AGENTS.md 模板（项目级 agent 行为约定）
+/agents — 显示当前加载的 AGENTS.md 指令
 /sessions — 列出历史会话
 /resume <N> — 恢复第 N 个历史会话
 /exit — 退出 fuckcode`,

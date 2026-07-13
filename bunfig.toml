@@ -1,0 +1,5 @@
+[install]
+registry = "https://registry.npmmirror.com"
+# Network here is slow/unstable for large packuments (effect ~10MB, zod ~3.4MB).
+# Allow generous per-request time so metadata fetches don't get truncated.
+network-timeout = 120000

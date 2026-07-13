@@ -2,7 +2,7 @@
 
 > 原生中文交互的终端 AI 编码工具。目标是从需求到开发测试的完整流程都能在一个工具里完成。
 
-**当前状态：v1.3（175 tests）** — 已完成探索→规划→执行→测试全流程推进 v1.1-v1.3：扩展工具、并发执行、Hook 系统。
+**当前状态：v1.6（205 tests）** — 全量推进完成：MCP+多 provider+记忆+microCompact+checkpoint+Hook+并发执行。11 个工具，4 个 provider 类型。
 
 ## 快速开始
 
@@ -142,6 +142,9 @@ bun run dev           # 启动 REPL
 | **v1.1 扩展工具** | TodoWrite + WebSearch/WebFetch + 自定义命令 + 动态工具 | ✅ |
 | **v1.2 性能+UX** | 并发执行 + AskUserQuestion + 输入历史 ↑↓ | ✅ |
 | **v1.3 Hook 系统** | PreToolUse/PostToolUse/UserPromptSubmit 可扩展 | ✅ |
+| **v1.4 生态接入** | MCP 客户端（stdio）+ 多 provider（OpenAI 兼容） | ✅ |
+| **v1.5 记忆+压缩** | 记忆系统（memdir）+ microCompact 细粒度压缩 | ✅ |
+| **v1.6 安全+增强** | 文件 checkpoint /rewind + 子 agent fork 模式 | ✅ |
 | v1.1+ | MCP 客户端 / 插件系统 / TodoWrite 任务跟踪 | ⬜ |
 
 完整设计见 [MVP 设计文档](docs/superpowers/specs/2026-07-13-fuckcode-mvp-design.md)，M1 实现计划见 [M1 计划文档](docs/superpowers/plans/2026-07-13-fuckcode-m1-skeleton.md)。

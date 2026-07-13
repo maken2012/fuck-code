@@ -1,7 +1,7 @@
 // src/agent/systemPrompt.ts
-// 中文 system prompt。M2 基础版（整段字符串）+ M3 工具说明注入。
-// M6 会加分段缓存（把 base / tool section 拆成 cache_control 块）。
-// 这段内容会作为对话的 system 角色传给模型，决定模型的行为基调。
+// 中文 system prompt。base 段（可缓存）+ tool section 段。
+// M6: anthropic.ts 在 systemCacheable=true 时会给 system 加 cache_control，
+// base 段跨轮稳定可命中 prompt cache。
 import type { Tool } from '@/tools/Tool.js'
 
 export interface BuildSystemPromptOpts {
@@ -20,8 +20,15 @@ export function buildSystemPrompt(opts?: BuildSystemPromptOpts): string {
 
 # 工具使用
 - 需要查看文件内容、搜索代码时，主动调用对应工具，不要凭空猜测
+- 修改文件前必须先用 Read 读取（Edit/Write 工具会强制校验"已读"状态）
 - 工具入参严格按其说明填写（如 Read 的 file_path 必须是绝对路径）
 - 工具返回错误时不要重复调用相同入参，先分析错误原因再调整
+- 优先用 Edit 做精确替换，整文件重写只在创建新文件时用 Write
+
+# 编码约定
+- 改动遵循现有代码风格（命名、缩进、注释密度）
+- 给出的代码要能直接用，不要省略关键部分用 "..." 占位
+- 运行测试或 lint 用 Bash 工具，不要假设结果
 
 # 当前环境
 - 工作目录：${process.cwd()}

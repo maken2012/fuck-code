@@ -237,3 +237,52 @@ test('tools 参数非空时透传到 create body', async () => {
   expect(captured.length).toBe(1)
   expect(captured[0]).toHaveProperty('tools')
 })
+
+// M6: prompt cache 测试
+test('systemCacheable=true 时 system 用 TextBlockParam 数组带 cache_control', async () => {
+  let capturedBody: Record<string, unknown> | undefined
+  const mockCreateCache = mock((_body: object) => {
+    capturedBody = _body as Record<string, unknown>
+    return fakeStream([
+      { type: 'message_start', message: { usage: { input_tokens: 5 } } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hi' } },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+      { type: 'message_stop' },
+    ])
+  })
+  for await (const _ of streamAnthropic({
+    model: 'm',
+    system: 'cached system',
+    messages: [{ role: 'user', content: 'q' }],
+    signal: new AbortController().signal,
+    systemCacheable: true,
+    _clientOverride: { messages: { create: mockCreateCache } } as any,
+  })) {
+    void _
+  }
+  expect(Array.isArray(capturedBody?.system)).toBe(true)
+  const sysBlocks = capturedBody?.system as object[]
+  expect((sysBlocks[0] as any).cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+})
+
+test('systemCacheable=false（默认）时 system 是字符串', async () => {
+  let capturedBody: Record<string, unknown> | undefined
+  const mockCreateNoCache = mock((_body: object) => {
+    capturedBody = _body as Record<string, unknown>
+    return fakeStream([
+      { type: 'message_start', message: { usage: { input_tokens: 1 } } },
+      { type: 'message_stop' },
+    ])
+  })
+  for await (const _ of streamAnthropic({
+    model: 'm',
+    system: 'plain system',
+    messages: [{ role: 'user', content: 'q' }],
+    signal: new AbortController().signal,
+    _clientOverride: { messages: { create: mockCreateNoCache } } as any,
+  })) {
+    void _
+  }
+  expect(typeof capturedBody?.system).toBe('string')
+  expect(capturedBody?.system).toBe('plain system')
+})

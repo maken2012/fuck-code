@@ -2,7 +2,7 @@
 
 > 原生中文交互的终端 AI 编码工具。目标是从需求到开发测试的完整流程都能在一个工具里完成。
 
-**当前状态：M5 会话 + 压缩（v0.1.0）** — 已实现 JSONL 会话持久化、/resume 恢复历史、autoCompact 自动压缩长对话。打磨发布（prompt cache、斜杠命令、错误处理）在 M6。
+**当前状态：v0.1.0 MVP 完成** — 从需求理解到代码修改、命令执行、会话持久化的完整编码 agent 已就绪。设置 ANTHROPIC_API_KEY 即可使用。
 
 ## 快速开始
 
@@ -124,8 +124,8 @@ bun run dev           # 启动 REPL
 | **M2 LLM + loop** | Anthropic 流式 + queryLoop + 多轮上下文 + abort | ✅ |
 | **M3 工具系统** | Tool 接口 + Read/Glob/Grep + queryLoop 工具循环 | ✅ |
 | **M4 写工具 + 权限** | Write/Edit/Bash + 权限决策管线 + ask 弹窗 | ✅ |
-| M5 会话 + 压缩 | JSONL 存储 + autoCompact | ⬜ |
-| M6 打磨发布 | prompt cache + 斜杠命令 + 错误处理 | ⬜ |
+| **M5 会话 + 压缩** | JSONL 存储 + 会话恢复 + autoCompact | ✅ |
+| **M6 打磨发布** | prompt cache + /cost/help + 网络重试 + 错误加固 | ✅ |
 
 完整设计见 [MVP 设计文档](docs/superpowers/specs/2026-07-13-fuckcode-mvp-design.md)，M1 实现计划见 [M1 计划文档](docs/superpowers/plans/2026-07-13-fuckcode-m1-skeleton.md)。
 

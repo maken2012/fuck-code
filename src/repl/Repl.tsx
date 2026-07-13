@@ -54,6 +54,8 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const chatHistoryRef = useRef<ChatMessage[]>([])
   const abortRef = useRef<AbortController | null>(null)
+  // M6: /cost 命令用的累计 token 统计
+  const totalTokensRef = useRef({ input: 0, output: 0, cacheRead: 0 })
   const configRef = useRef<{
     model: string
     apiKey?: string
@@ -217,6 +219,11 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
             ])
             break
           case 'usage':
+            // M6: 累加 token 用量（供 /cost 命令）
+            totalTokensRef.current.input += event.input
+            totalTokensRef.current.output += event.output
+            totalTokensRef.current.cacheRead += event.cacheRead
+            break
           case 'done':
             break
         }
@@ -353,6 +360,37 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
         setInput('')
         return
       }
+      // M6: /cost 显示 token 用量
+      if (text === '/cost') {
+        const t = totalTokensRef.current
+        setHistory((h) => [
+          ...h,
+          {
+            role: 'assistant' as const,
+            text: `本次会话用量：输入 ${t.input} / 输出 ${t.output} / 缓存读 ${t.cacheRead} tokens`,
+          },
+        ])
+        setInput('')
+        return
+      }
+      // M6: /help 显示命令列表
+      if (text === '/help' || text === '/?') {
+        setHistory((h) => [
+          ...h,
+          {
+            role: 'assistant' as const,
+            text: `可用命令：
+/clear — 清空当前对话上下文
+/cost — 显示本次会话 token 用量
+/help — 显示此帮助
+/sessions — 列出历史会话
+/resume <N> — 恢复第 N 个历史会话
+/exit — 退出 fuckcode`,
+          },
+        ])
+        setInput('')
+        return
+      }
       // M5：/sessions 与 /resume N 是异步命令，用 void 包装避免阻塞 useInput
       if (text === '/sessions' || text === '/resume' || text.startsWith('/resume ')) {
         if (!running) {
@@ -425,7 +463,7 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
             ? '等待权限确认...'
             : running
               ? '正在生成... Ctrl+C 中断当前轮次'
-              : 'Ctrl+C 退出 · /clear 清空 · /sessions 历史 · /resume N 恢复 · /exit 退出'}
+              : 'Ctrl+C 退出 · /help 帮助 · /cost 用量 · /clear 清空 · /sessions 历史 · /exit 退出'}
         </Text>
       </Box>
     </Box>

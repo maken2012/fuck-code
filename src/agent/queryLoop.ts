@@ -243,6 +243,7 @@ export async function* queryLoop(
         maxTokens: opts.maxTokens,
         signal: opts.signal,
         apiKey: opts.apiKey,
+        systemCacheable: true, // M6: 启用 prompt cache，system 静态段跨轮命中
       }
       if (hasTools) {
         streamOpts.tools = toolsToAnthropicFormat(tools)

@@ -35,6 +35,8 @@ export interface StreamAnthropicOpts {
   apiKey?: string
   /** M3：Anthropic tools API 格式的工具定义数组 */
   tools?: object[]
+  /** M6：启用 prompt cache（system 静态段 + 末条 user message 加 cache_control） */
+  systemCacheable?: boolean
   /** 测试用：注入 mock client（生产代码不传） */
   _clientOverride?: MockClient
 }
@@ -64,6 +66,37 @@ export interface RawStreamEvent {
   usage?: { output_tokens?: number }
 }
 
+// M6: 网络错误/429 限流重试（最多 3 次，指数退避）。非可重试错误直接抛。
+async function createWithRetry(
+  client: MockClient,
+  body: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<AsyncIterable<RawStreamEvent>> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const result = await client.messages.create(body, { signal })
+      return result as AsyncIterable<RawStreamEvent>
+    } catch (e) {
+      lastError = e
+      if (signal.aborted) throw e
+      const err = e as { status?: number; code?: string; headers?: { 'retry-after'?: string } }
+      const is429 = err.status === 429
+      const isNetwork = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.code === 'ENOTFOUND'
+      // 只重试 429 和网络错误，其他（4xx 客户端错误）直接抛
+      if (!is429 && !isNetwork) throw e
+      if (attempt < 2) {
+        // 429 读 retry-after；网络错误指数退避 1s/2s
+        const delay = is429
+          ? parseInt(err.headers?.['retry-after'] ?? '1') * 1000
+          : 1000 * (attempt + 1)
+        await new Promise((r) => setTimeout(r, delay))
+      }
+    }
+  }
+  throw lastError
+}
+
 export async function* streamAnthropic(
   opts: StreamAnthropicOpts,
 ): AsyncGenerator<LlmEvent> {
@@ -72,14 +105,18 @@ export async function* streamAnthropic(
   const client: MockClient =
     opts._clientOverride ??
     (new Anthropic({ apiKey: opts.apiKey }) as unknown as MockClient)
-
   // 构造 messages.create body。tools 仅在有值时附加（空数组会让 API 报错）。
+  // M6: systemCacheable 时 system 用 TextBlockParam 数组 + cache_control（静态段稳定后跨轮命中 cache）
   const body: Record<string, unknown> = {
     model: opts.model,
     max_tokens: opts.maxTokens ?? 8192,
-    system: opts.system,
     messages: opts.messages,
     stream: true,
+  }
+  if (opts.systemCacheable) {
+    body.system = [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral', ttl: '1h' } }]
+  } else {
+    body.system = opts.system
   }
   if (opts.tools && opts.tools.length > 0) {
     body.tools = opts.tools
@@ -87,7 +124,7 @@ export async function* streamAnthropic(
 
   let stream: AsyncIterable<RawStreamEvent>
   try {
-    stream = await client.messages.create(body, { signal: opts.signal })
+    stream = await createWithRetry(client, body, opts.signal)
   } catch (e) {
     if (opts.signal.aborted) throw new DOMException('Aborted', 'AbortError')
     throw e

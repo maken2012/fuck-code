@@ -27,7 +27,7 @@ test('Task inputSchema 必填 description + prompt', () => {
   expect(missing.success).toBe(false)
 })
 
-test('Task inputSchema subagent_type 只接受 explore/general', () => {
+test('Task inputSchema subagent_type 只接受 explore/general/fork', () => {
   const invalid = TaskTool.inputSchema.safeParse({
     description: '测试',
     prompt: '测试',
@@ -40,5 +40,5 @@ test('Task jsonSchema 含 description/prompt 必填 + subagent_type 枚举', () 
   const schema = TaskTool.jsonSchema as { properties: Record<string, { enum?: string[] }>; required: string[] }
   expect(schema.required).toContain('description')
   expect(schema.required).toContain('prompt')
-  expect(schema.properties.subagent_type?.enum).toEqual(['explore', 'general'])
+  expect(schema.properties.subagent_type?.enum).toEqual(['explore', 'general', 'fork'])
 })

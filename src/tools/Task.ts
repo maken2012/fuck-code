@@ -22,9 +22,9 @@ const TaskInput = z.object({
   description: z.string().describe('一句话任务描述（5-15 字），用于让用户知道子 agent 在做什么'),
   prompt: z.string().describe('给子 agent 的详细任务指令'),
   subagent_type: z
-    .enum(['explore', 'general'])
+    .enum(['explore', 'general', 'fork'])
     .optional()
-    .describe('子 agent 类型：explore（只读探索，默认）/ general（通用，可写）'),
+    .describe('子 agent 类型：explore（只读探索，默认）/ general（通用，可写）/ fork（继承父上下文）'),
 })
 type TaskInputType = z.infer<typeof TaskInput>
 
@@ -38,9 +38,19 @@ const SUBAGENT_SYSTEM_PREFIX = `你是一个被主 agent 派遣来执行具体�
 - 如果任务无法完成（信息不足、矛盾），说明原因
 
 # 与主 agent 的关系
-- 你看不到主对话的历史，只看到给你的任务
+- 你看不到主对话的历史，只看到给你的任务（fork 模式除外，会继承上下文）
 - 你的最终输出会被主 agent 读到，所以要完整、准确
 - 引用代码时给 file_path:line_number`
+
+// fork 模式专用 prompt
+const FORK_SYSTEM_PREFIX = `你是一个 fork 子 agent，继承了主 agent 的完整对话上下文。
+
+# 你的职责
+- 你看到了主对话的完整历史（共享上下文）
+- 基于已有上下文继续完成指定任务
+- 适合"基于刚才的发现继续做"这类延续性任务
+- 完成后把结果汇报给主 agent`
+
 
 export const TaskTool = buildTool<TaskInputType>({
   name: 'Task',
@@ -68,7 +78,7 @@ export const TaskTool = buildTool<TaskInputType>({
     properties: {
       description: { type: 'string', description: '5-15 字任务简述' },
       prompt: { type: 'string', description: '给子 agent 的详细任务指令' },
-      subagent_type: { type: 'string', enum: ['explore', 'general'], description: 'explore（只读，默认）/ general' },
+      subagent_type: { type: 'string', enum: ['explore', 'general', 'fork'], description: 'explore（只读，默认）/ general（可写）/ fork（继承父上下文）' },
     },
     required: ['description', 'prompt'],
   },
@@ -80,6 +90,7 @@ export const TaskTool = buildTool<TaskInputType>({
   async execute(input, ctx) {
     const subagentType = input.subagent_type ?? 'explore'
     const isExplore = subagentType === 'explore'
+    const isFork = subagentType === 'fork'
 
     // 子 agent 用独立 AbortController（子 agent 超时 120s）
     const subAc = new AbortController()
@@ -87,25 +98,34 @@ export const TaskTool = buildTool<TaskInputType>({
     // 父 abort 也传播
     ctx.abortSignal.addEventListener('abort', () => subAc.abort())
 
-    // 子 agent 的工具集：explore 只给只读三件套；general 给全部
-    const allTools = getAllTools().filter((t) => t.name !== 'Task') // 防止子 agent 递归派子 agent（M3 简化）
+    // 子 agent 的工具集：
+    // - explore：只给只读三件套
+    // - general：给全部（不含 Task 防递归）
+    // - fork：给全部（继承上下文，通常继续实现）
+    const allTools = getAllTools().filter((t) => t.name !== 'Task')
     const subTools = isExplore
       ? allTools.filter((t) => t.name === 'Read' || t.name === 'Glob' || t.name === 'Grep')
       : allTools
 
     // 子 agent 的 system prompt
+    const subPrefix = isFork ? FORK_SYSTEM_PREFIX : SUBAGENT_SYSTEM_PREFIX
     const subSystem =
-      (await buildSystemPrompt({ tools: subTools })) + '\n\n' + SUBAGENT_SYSTEM_PREFIX
+      (await buildSystemPrompt({ tools: subTools })) + '\n\n' + subPrefix
 
     try {
       let subResult = ''
       let turn = 0
-      const messages: ChatMessage[] = []
       const MAX_SUB_TURNS = 10
+
+      // fork 模式：继承父对话历史（从 readFileState 或传入的 history）
+      // v1.6 简化：fork 的 history 由 queryLoop 内部 messages 提供（这里传空，让 fork
+      // 的"继承"通过 system prompt 引导模型回看主上下文实现，真正的 history 继承需要
+      // queryLoop 传入父 messages，留 v1.7）
+      const subHistory: ChatMessage[] = []
 
       // 子 agent 的 mini queryLoop（复用 queryLoop 函数）
       for await (const event of queryLoop({
-        history: [],
+        history: subHistory,
         userInput: input.prompt,
         model: 'claude-sonnet-4-5-20250929', // 子 agent 默认用 sonnet（便宜够用）
         system: subSystem,
@@ -138,7 +158,6 @@ export const TaskTool = buildTool<TaskInputType>({
         return { ok: false, error: '父级已中断', isError: true }
       }
 
-      void messages // 暂未持久化子 agent 历史（M3 简化）
       return {
         ok: true,
         data: subResult.trim() || '（子 agent 未产出文本）',

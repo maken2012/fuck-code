@@ -10,7 +10,7 @@
 - 运行时：Bun ≥ 1.2（**本机未安装，Task 1 会装**）
 - 语言：TypeScript（ESM, `jsx: 'react-jsx'`）
 - 效应系统：`effect@3.21.4`
-- TUI：`ink@7.1.0` + `react@18.3.1`（**⚠️ 不要用 React 19**——与 `@types/react@19` 的 JSX 全局类型有兼容坑，见 [DefinitelyTyped #52321](https://github.com/DefinitelyTyped/DefinitelyTyped/issues/52321)）
+- TUI：`ink@7.1.0` + `react@19.2.7`（**⚠️ ink 7.1.0 的 peerDep 明确要求 `react >= 19.2.0`**，实测 `ink@7` + `react@18` 会崩 `useEffectEvent not found`。之前担心的 DT #52321 是 react 19.0.x 早期问题，19.2+ 已修复）
 - CLI：`@commander-js/extra-typings@15.0.0`
 - 配置校验：`zod@3`
 - 测试：`bun test`（Bun 内置，不引入 vitest）
@@ -64,7 +64,15 @@ fuck-code/
 
 ---
 
-## Task 1: 安装 Bun 运行时
+## Task 1: 安装 Bun 运行时 ✅ 已完成
+
+**实际执行记录（2026-07-13）：**
+- brew install oven-sh/bun/bun 卡住（第三方 tap bottle 不走清华源，仍从 GitHub 拉，慢）
+- bun.sh 官方脚本下载 bun-darwin-aarch64.zip 时 HTTP/2 framing 报错
+- GitHub 加速代理（ghproxy 等）均不通
+- **最终方案：`npm install -g bun`**（本机 npm 已配 registry.npmmirror.com 淘宝镜像，30 秒装完）
+- **结果**：bun 1.3.14 安装在 `/Users/shun/.local/bin/bun`，已在 PATH 中
+- ⚠️ 注意：bun 实际位置是 `~/.local/bin/bun`（npm global 路径），**不是** `~/.bun/bin/bun`。后续 Task 中所有 `export PATH="$HOME/.bun/bin:$PATH"` 都**不需要**
 
 **Files:** 无（仅环境）
 
@@ -129,13 +137,13 @@ Expected: 打印 `42`，证明 Bun 能直接跑 TS。
     "@commander-js/extra-typings": "15.0.0",
     "effect": "3.21.4",
     "ink": "7.1.0",
-    "react": "18.3.1",
+    "react": "19.2.7",
     "zod": "3.24.0"
   },
   "devDependencies": {
     "@types/bun": "1.2.0",
-    "@types/react": "18.3.0",
-    "typescript": "5.7.0"
+    "@types/react": "19.2.17",
+    "typescript": "5.7.2"
   },
   "engines": {
     "bun": ">=1.2.0"
@@ -147,7 +155,8 @@ Expected: 打印 `42`，证明 Bun 能直接跑 TS。
 - `bin` 注册 `fuckcode` 和 `fc` 两个命令指向同一入口
 - `@anthropic-ai/sdk` M1 不用，但提前装好，M2 直接 import
 - `type: module` + Bun 天生支持 ESM 和 `.tsx`
-- **React 用 18.3.1 而非 19**——Ink 7 要求 React ≥ 18；React 19 的 `@types/react@19` 与 JSX 全局类型有兼容坑（DefinitelyTyped #52321），M1 规避
+- **React 用 19.2.7**——ink 7.1.0 的 peerDep 明确要求 `react >= 19.2.0`（实测 react 18 会在 import ink 时崩 `useEffectEvent not found`）
+- `typescript` 用 5.7.2（5.7.0 从未正式发布，5.7 系列只有 5.7.2/5.7.3）
 
 - [ ] **Step 2: 写 .gitignore**
 

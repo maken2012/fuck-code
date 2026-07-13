@@ -414,7 +414,7 @@ export async function* queryLoop(
       if (concurrencySafe.length > 0) {
         const results = await Promise.all(
           concurrencySafe.map(async ({ tu, tool, input }) => {
-            const result = await tool.execute(input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState })
+            const result = await tool.execute(input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState, parentHistory: messages })
             return { tu, tool, result }
           }),
         )
@@ -432,7 +432,7 @@ export async function* queryLoop(
 
       // 串行工具依次执行（非并发安全：Write/Edit/Bash/Task 等）
       for (const { tu, tool, input } of serial) {
-        const result = await tool.execute(input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState })
+        const result = await tool.execute(input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState, parentHistory: messages })
         const content = result.ok
           ? (tool.formatResult ? tool.formatResult(result.data) : JSON.stringify(result.data))
           : `错误: ${result.error}`

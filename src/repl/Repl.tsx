@@ -20,6 +20,7 @@ import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
 import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
 import { listCheckpoints, restoreCheckpoint } from '@/tools/checkpoint.js'
 import type { Checkpoint } from '@/tools/checkpoint.js'
+import { loadPromptHistory, appendPromptHistory } from '@/services/PromptHistory.js'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { getAllTools } from '@/tools/registry.js'
@@ -116,6 +117,10 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
       .finally(() => setConfigLoaded(true))
     // 创建初始 session（失败不致命：queryLoop 不传 sessionId 仍能跑）
     createSession(process.cwd()).then(setSessionId).catch(() => {})
+    // v1.7: 加载跨会话输入历史（inputHistoryRef 用"旧在前"顺序，loadPromptHistory 返回"最近在前"，需反转）
+    loadPromptHistory(process.cwd())
+      .then((hist) => { inputHistoryRef.current = hist.slice().reverse() })
+      .catch(() => {})
   }, [])
 
   async function runQuery(text: string) {
@@ -727,11 +732,13 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         }
       }
       if (text && !running) {
-        // v1.2: 存入输入历史（去重连续相同项）
+        // v1.2+v1.7: 存入输入历史（内存 + 跨会话持久化）
         const hist = inputHistoryRef.current
         if (hist[hist.length - 1] !== text) {
           hist.push(text)
-          if (hist.length > 100) hist.shift() // 最多 100 条
+          if (hist.length > 100) hist.shift()
+          // v1.7: 持久化到 ~/.fuckcode/history/<hash>.jsonl
+          void appendPromptHistory(process.cwd(), text).catch(() => {})
         }
         historyIndexRef.current = -1
         setInput('')

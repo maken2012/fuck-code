@@ -3,6 +3,7 @@
 // 工具用普通 async，不依赖 Effect——中度 Effect 架构里工具层是纯业务逻辑。
 import type { z } from 'zod'
 import type { ReadFileState } from '@/tools/_readFileState.js'
+import type { ChatMessage } from '@/llm/types.js'
 
 // 工具执行上下文（queryLoop 传入）
 export interface ToolContext {
@@ -10,6 +11,8 @@ export interface ToolContext {
   abortSignal: AbortSignal
   /** M4：跨工具共享的"已读文件"状态。Read 写入；Edit/Write 执行前校验（hard guard）。 */
   readFileState: ReadFileState
+  /** v1.7：父对话历史（仅 Task fork 模式用，其他工具忽略）。queryLoop 执行 Task 时传入。 */
+  parentHistory?: ChatMessage[]
 }
 
 // 工具执行结果：成功带 data，失败带 error

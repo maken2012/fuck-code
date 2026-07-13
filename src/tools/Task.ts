@@ -117,11 +117,9 @@ export const TaskTool = buildTool<TaskInputType>({
       let turn = 0
       const MAX_SUB_TURNS = 10
 
-      // fork 模式：继承父对话历史（从 readFileState 或传入的 history）
-      // v1.6 简化：fork 的 history 由 queryLoop 内部 messages 提供（这里传空，让 fork
-      // 的"继承"通过 system prompt 引导模型回看主上下文实现，真正的 history 继承需要
-      // queryLoop 传入父 messages，留 v1.7）
-      const subHistory: ChatMessage[] = []
+      // v1.7: fork 模式真正继承父对话历史（通过 ctx.parentHistory）
+      // explore/general 用空 history（独立上下文），fork 用父 history（延续）
+      const subHistory: ChatMessage[] = isFork ? (ctx.parentHistory ?? []) : []
 
       // 子 agent 的 mini queryLoop（复用 queryLoop 函数）
       for await (const event of queryLoop({

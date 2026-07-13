@@ -4,7 +4,9 @@
 // 上层（agent loop、TUI）完全不感知 Effect。
 import { Effect, Runtime, Layer, Scope } from 'effect'
 import { Config, ConfigLive } from '@/services/Config.js'
+import type { ConfigValue } from '@/services/Config.js'
 import { Logger, LoggerLive } from '@/services/Logger.js'
+import type { LoggerService } from '@/services/Logger.js'
 
 // 构建主 Layer（合并所有 Service 的实现）
 // 注意：ConfigLive 是常量 Layer.effect；LoggerLive 是工厂函数 (opts?) => Layer<Logger>
@@ -55,18 +57,11 @@ export async function runEffect<A, E>(
 }
 
 // 对外"假装不是 Effect"的 service 获取函数
-export async function getConfig(): Promise<{
-  value: import('@/services/Config.js').ConfigValue
-}> {
-  return runEffect(
-    Effect.map(Config, (c) => c as { value: import('@/services/Config.js').ConfigValue }),
-  )
+// Effect.map(Tag, c => c) 直接拿到 Service 实例，类型由 Tag 自动推导，无需 as 断言。
+export async function getConfig(): Promise<{ value: ConfigValue }> {
+  return runEffect(Effect.map(Config, (c) => c))
 }
 
-export async function getLogger(): Promise<
-  import('@/services/Logger.js').LoggerService
-> {
-  return runEffect(
-    Effect.map(Logger, (l) => l as import('@/services/Logger.js').LoggerService),
-  )
+export async function getLogger(): Promise<LoggerService> {
+  return runEffect(Effect.map(Logger, (l) => l))
 }

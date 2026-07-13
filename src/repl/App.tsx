@@ -14,8 +14,11 @@ export async function startRepl(opts: StartReplOpts = {}): Promise<void> {
   // 启动期初始化 runtime（异步：ConfigLive 读文件是 Effect.tryPromise，
   // Layer.toRuntime 必须 runPromise 求值，见 runtime.ts 注释）。
   await getRuntime(opts)
-  // 读一次 config 用于显示（如 model 名）；失败不阻塞启动。
-  const config = await getConfig().catch(() => null)
+  // 读一次 config 用于显示（如 model 名）；失败不阻塞启动，但写 stderr 提示便于调试。
+  const config = await getConfig().catch((e: unknown) => {
+    process.stderr.write(`警告: 配置加载失败，使用默认值: ${String(e)}\n`)
+    return null
+  })
 
   // Ink 的 useInput 需要 TTY（setRawMode）。非 TTY 环境（CI、管道、重定向 stdin）
   // 给出友好提示而非 Ink 的红色错误栈。

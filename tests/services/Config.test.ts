@@ -52,15 +52,14 @@ test('project 级配置覆盖 user 级', async () => {
     resolve(tmpHome, '.fuckcode', 'config.json'),
     JSON.stringify({ model: 'user-level', maxTokens: 1000 }),
   )
-  // 模拟项目级配置
-  const projectConfigPath = resolve(process.cwd(), '.fuckcode', 'config.json')
-  await mkdir(resolve(process.cwd(), '.fuckcode'), { recursive: true })
-  await writeFile(projectConfigPath, JSON.stringify({ maxTokens: 9999 }))
-  try {
-    const cfg = await loadConfig({ cwd: process.cwd() })
-    expect(cfg.model).toBe('user-level')        // 来自 user 级
-    expect(cfg.maxTokens).toBe(9999)            // 来自 project 级（覆盖）
-  } finally {
-    await rm(resolve(process.cwd(), '.fuckcode'), { recursive: true, force: true })
-  }
+  // 用临时 cwd 模拟项目目录，避免污染真实仓库根（reviewer I2 建议）
+  const tmpProject = resolve(tmpHome, 'project-a')
+  await mkdir(resolve(tmpProject, '.fuckcode'), { recursive: true })
+  await writeFile(
+    resolve(tmpProject, '.fuckcode', 'config.json'),
+    JSON.stringify({ maxTokens: 9999 }),
+  )
+  const cfg = await loadConfig({ cwd: tmpProject })
+  expect(cfg.model).toBe('user-level') // 来自 user 级
+  expect(cfg.maxTokens).toBe(9999) // 来自 project 级（覆盖）
 })

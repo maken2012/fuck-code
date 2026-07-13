@@ -2,7 +2,7 @@
 
 > 原生中文交互的终端 AI 编码工具。目标是从需求到开发测试的完整流程都能在一个工具里完成。
 
-**当前状态：v1.0（142 tests）** — 从需求到开发测试的完整流程已就绪。/workflow 自动走"理解→实现→验证→回顾"四阶段。
+**当前状态：v1.1（161 tests）** — 新增 TodoWrite 任务跟踪、Web 搜索抓取、自定义斜杠命令、动态工具加载。工具数达 10+。
 
 ## 快速开始
 
@@ -139,6 +139,7 @@ bun run dev           # 启动 REPL
 | **v0.2c Task 子 agent** | 派子 agent 隔离探索/调研（explore/general） | ✅ |
 | **v0.3 AGENTS.md** | 项目级指令文件 + /init /agents | ✅ |
 | **v1.0 工作流层** | /workflow 四阶段（理解→实现→验证→回顾）★ 核心差异化 | ✅ |
+| **v1.1 扩展工具** | TodoWrite + WebSearch/WebFetch + 自定义命令 + 动态工具 | ✅ |
 | v1.1+ | MCP 客户端 / 插件系统 / TodoWrite 任务跟踪 | ⬜ |
 
 完整设计见 [MVP 设计文档](docs/superpowers/specs/2026-07-13-fuckcode-mvp-design.md)，M1 实现计划见 [M1 计划文档](docs/superpowers/plans/2026-07-13-fuckcode-m1-skeleton.md)。

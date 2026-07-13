@@ -27,7 +27,7 @@
 import type { ChatMessage, ContentBlock, LlmEvent } from '@/llm/types.js'
 import type { QueryEvent, PermissionUserDecision } from '@/agent/types.js'
 import type { Tool } from '@/tools/Tool.js'
-import { streamAnthropic } from '@/llm/anthropic.js'
+import { streamMessage } from '@/llm/provider.js'
 import { findTool, toolsToAnthropicFormat } from '@/tools/registry.js'
 import { checkPermission } from '@/permissions/decision.js'
 import type { PermissionMode } from '@/permissions/modes.js'
@@ -191,10 +191,10 @@ export async function* queryLoop(
   // 注意：若触发了 autoCompact，新增队列要重置（compact 已落盘 boundary）。
   let pendingPersist: ChatMessage[] = [userMessage]
 
-  // 选 LLM stream 函数（测试用 override，生产用 streamAnthropic）
+  // 选 LLM stream 函数（测试用 override，生产用 streamMessage 支持多 provider）
   const streamFn =
     opts._llmOverride ??
-    (streamAnthropic as (o: object) => AsyncGenerator<LlmEvent>)
+    (streamMessage as (o: object) => AsyncGenerator<LlmEvent>)
 
   // M5：autoCompact 阈值（默认 200000 contextWindow）
   const contextWindow = opts.contextWindow ?? DEFAULT_CONTEXT_WINDOW

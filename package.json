@@ -19,6 +19,7 @@
     "@commander-js/extra-typings": "15.0.0",
     "effect": "3.21.4",
     "ink": "7.1.0",
+    "openai": "^6.46.0",
     "react": "19.2.7",
     "zod": "3.24.0"
   },

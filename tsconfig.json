@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "types": ["bun"],
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "baseUrl": "."
+  },
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules"]
+}

@@ -5,6 +5,12 @@
 // - content_block_start 只记录 index，不取 text（SDK 会重复发，text 只从 delta 取）
 // - input_tokens 只取 message_start，output_tokens 只取 message_delta
 // - abort 转成 AbortError；支持 _clientOverride 用于测试 mock
+//
+// M3 新增：
+// - tools 参数透传到 messages.create body
+// - 解析 tool_use 类型 content_block（content_block_start 记 id/name，
+//   content_block_delta 的 input_json_delta 累积 partial_json，
+//   content_block_stop 时 yield tool_use 事件）
 import Anthropic from '@anthropic-ai/sdk'
 import type { ChatMessage, LlmEvent } from '@/llm/types.js'
 
@@ -27,6 +33,8 @@ export interface StreamAnthropicOpts {
   maxTokens?: number
   signal: AbortSignal
   apiKey?: string
+  /** M3：Anthropic tools API 格式的工具定义数组 */
+  tools?: object[]
   /** 测试用：注入 mock client（生产代码不传） */
   _clientOverride?: MockClient
 }
@@ -41,8 +49,18 @@ export interface RawStreamEvent {
     }
   }
   index?: number
-  content_block?: { type: string }
-  delta?: { type?: string; text?: string; stop_reason?: string }
+  // content_block：text / tool_use 都可能（M3）
+  content_block?: {
+    type?: string
+    // tool_use 专属
+    id?: string
+    name?: string
+    // text 专属（content_block_start 里 SDK 会塞一遍 text，我们忽略）
+    text?: string
+  }
+  delta?:
+    | { type?: string; text?: string; stop_reason?: string } // text_delta / message_delta
+    | { type: 'input_json_delta'; partial_json: string } // tool_use input 碎片
   usage?: { output_tokens?: number }
 }
 
@@ -55,18 +73,21 @@ export async function* streamAnthropic(
     opts._clientOverride ??
     (new Anthropic({ apiKey: opts.apiKey }) as unknown as MockClient)
 
+  // 构造 messages.create body。tools 仅在有值时附加（空数组会让 API 报错）。
+  const body: Record<string, unknown> = {
+    model: opts.model,
+    max_tokens: opts.maxTokens ?? 8192,
+    system: opts.system,
+    messages: opts.messages,
+    stream: true,
+  }
+  if (opts.tools && opts.tools.length > 0) {
+    body.tools = opts.tools
+  }
+
   let stream: AsyncIterable<RawStreamEvent>
   try {
-    stream = await client.messages.create(
-      {
-        model: opts.model,
-        max_tokens: opts.maxTokens ?? 8192,
-        system: opts.system,
-        messages: opts.messages,
-        stream: true,
-      },
-      { signal: opts.signal },
-    )
+    stream = await client.messages.create(body, { signal: opts.signal })
   } catch (e) {
     if (opts.signal.aborted) throw new DOMException('Aborted', 'AbortError')
     throw e
@@ -77,6 +98,13 @@ export async function* streamAnthropic(
   let outputTokens = 0
   let cacheRead = 0
   let stopReason = 'end_turn'
+
+  // tool_use block 的累积状态（按 index 索引）。content_block_stop 时 yield。
+  // 每个 index 对应一个独立的 content block；text 块直接 yield 不在此存。
+  const toolBlocks = new Map<
+    number,
+    { id: string; name: string; inputJson: string }
+  >()
 
   try {
     for await (const part of stream) {
@@ -89,17 +117,56 @@ export async function* streamAnthropic(
           }
           break
         case 'content_block_start':
-          // 只记录 index，不取 text——SDK 会在这里发一遍内容，然后 delta 又发，必须防重复
+          // tool_use：记录 index + id + name，初始化 inputJson 累积器
+          // text：只记录 index，不取 text（SDK 会重复发，text 只从 delta 取）
+          if (part.content_block?.type === 'tool_use') {
+            const idx = part.index ?? 0
+            toolBlocks.set(idx, {
+              id: part.content_block.id ?? '',
+              name: part.content_block.name ?? '',
+              inputJson: '',
+            })
+          }
           break
         case 'content_block_delta':
-          if (part.delta?.type === 'text_delta' && part.delta.text) {
+          if (!part.delta) break
+          if ('partial_json' in part.delta) {
+            // tool_use input 的流式碎片（input_json_delta）
+            const idx = part.index ?? 0
+            const tb = toolBlocks.get(idx)
+            if (tb) tb.inputJson += part.delta.partial_json
+          } else if (part.delta.type === 'text_delta' && part.delta.text) {
             yield { type: 'text', textDelta: part.delta.text }
           }
           break
+        case 'content_block_stop': {
+          // 如果该 index 是 tool_use，解析完整 input 并 yield tool_use 事件
+          const idx = part.index ?? 0
+          const tb = toolBlocks.get(idx)
+          if (tb) {
+            let parsedInput: unknown
+            try {
+              // 空字符串视作空对象（部分场景模型可能不发 input 碎片）
+              parsedInput = tb.inputJson ? JSON.parse(tb.inputJson) : {}
+            } catch {
+              parsedInput = { _raw: tb.inputJson }
+            }
+            yield {
+              type: 'tool_use',
+              toolName: tb.name,
+              toolUseId: tb.id,
+              input: parsedInput,
+            }
+            toolBlocks.delete(idx)
+          }
+          break
+        }
         case 'message_delta':
           // output 累计值；input 类不取（可能发 0 覆盖掉 message_start 的值）
           if (part.usage) outputTokens = part.usage.output_tokens ?? outputTokens
-          if (part.delta?.stop_reason) stopReason = part.delta.stop_reason
+          if (part.delta && 'stop_reason' in part.delta && part.delta.stop_reason) {
+            stopReason = part.delta.stop_reason
+          }
           break
         case 'message_stop':
           break

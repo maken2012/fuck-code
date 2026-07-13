@@ -142,3 +142,98 @@ test('abort 时抛 AbortError', async () => {
   }
   await expect(drain()).rejects.toThrow(/abort/i)
 })
+
+test('解析 tool_use 流式响应（input_json_delta 累积）', async () => {
+  const events = [
+    { type: 'message_start', message: { usage: { input_tokens: 8, cache_read_input_tokens: 0 } } },
+    // 先来一小段文本
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '我来读一下' } },
+    { type: 'content_block_stop', index: 0 },
+    // 然后是 tool_use block
+    {
+      type: 'content_block_start',
+      index: 1,
+      content_block: { type: 'tool_use', id: 'toolu_abc', name: 'Read' },
+    },
+    {
+      type: 'content_block_delta',
+      index: 1,
+      delta: { type: 'input_json_delta', partial_json: '{"file_path":' },
+    },
+    {
+      type: 'content_block_delta',
+      index: 1,
+      delta: { type: 'input_json_delta', partial_json: '"/tmp/x.ts"}' },
+    },
+    { type: 'content_block_stop', index: 1 },
+    {
+      type: 'message_delta',
+      delta: { stop_reason: 'tool_use' },
+      usage: { output_tokens: 30 },
+    },
+    { type: 'message_stop' },
+  ]
+  mockCreate.mockReturnValue(fakeStream(events))
+
+  const out: LlmEvent[] = []
+  for await (const e of streamAnthropic({
+    model: 'm',
+    system: 's',
+    messages: [],
+    signal: new AbortController().signal,
+    _clientOverride: mockClient(),
+  })) {
+    out.push(e)
+  }
+
+  // 应有 1 个 text + 1 个 tool_use + usage + done
+  const texts = out.filter((e) => e.type === 'text')
+  expect(texts.length).toBe(1)
+  if (texts[0]?.type === 'text') expect(texts[0].textDelta).toBe('我来读一下')
+
+  const toolUse = out.find((e) => e.type === 'tool_use')
+  if (toolUse && toolUse.type === 'tool_use') {
+    expect(toolUse.toolName).toBe('Read')
+    expect(toolUse.toolUseId).toBe('toolu_abc')
+    expect(toolUse.input).toEqual({ file_path: '/tmp/x.ts' })
+  } else {
+    throw new Error('missing tool_use event')
+  }
+
+  const done = out.find((e) => e.type === 'done')
+  if (done && done.type === 'done') {
+    expect(done.stopReason).toBe('tool_use')
+  } else {
+    throw new Error('missing done event')
+  }
+})
+
+test('tools 参数非空时透传到 create body', async () => {
+  // 空流，只验证 body 内容
+  mockCreate.mockReturnValue(
+    fakeStream([{ type: 'message_start', message: { usage: {} } }, { type: 'message_stop' }]),
+  )
+  const captured: object[] = []
+  mockCreate.mockImplementationOnce((body: object) => {
+    captured.push(body)
+    return fakeStream([
+      { type: 'message_start', message: { usage: {} } },
+      { type: 'message_stop' },
+    ])
+  })
+
+  for await (const _ of streamAnthropic({
+    model: 'm',
+    system: 's',
+    messages: [],
+    signal: new AbortController().signal,
+    tools: [{ name: 'Read', description: '读文件', input_schema: {} }],
+    _clientOverride: mockClient(),
+  })) {
+    // drain
+  }
+
+  expect(captured.length).toBe(1)
+  expect(captured[0]).toHaveProperty('tools')
+})

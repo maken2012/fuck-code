@@ -17,10 +17,12 @@
 // - queryLoop 内部 messages 用 string | ContentBlock[] 的完整结构化形态
 // - abort 抛 AbortError → yield aborted + done
 import type { ChatMessage, ContentBlock, LlmEvent } from '@/llm/types.js'
-import type { QueryEvent } from '@/agent/types.js'
+import type { QueryEvent, PermissionUserDecision } from '@/agent/types.js'
 import type { Tool } from '@/tools/Tool.js'
 import { streamAnthropic } from '@/llm/anthropic.js'
 import { findTool, toolsToAnthropicFormat } from '@/tools/registry.js'
+import { checkPermission } from '@/permissions/decision.js'
+import type { PermissionMode } from '@/permissions/modes.js'
 
 // 防止模型无限调工具导致死循环（M3 安全护栏）
 const MAX_TURNS = 20
@@ -37,8 +39,55 @@ export interface QueryLoopOpts {
   cwd: string
   /** M3：可用工具列表（不传则禁用工具，退化为 M2 单轮） */
   tools?: Tool[]
+  /** M4：权限模式（默认 'default'：只读放行、写询问） */
+  permissionMode?: PermissionMode
+  /** M4：权限规则（allow/ask/deny 三类规则字符串） */
+  permissions?: { allow: string[]; ask: string[]; deny: string[] }
   /** 测试用：注入 mock streamAnthropic（生产代码不传） */
   _llmOverride?: (opts: object) => AsyncGenerator<LlmEvent>
+}
+
+// 给 UI 显示的 input 摘要：Bash→command；Edit/Write→file_path；其他→JSON 截断。
+// 不抛错（input 结构非预期时回退到 JSON 截断），永远返回字符串。
+function summarizeInput(toolName: string, input: unknown): string {
+  const i = (input ?? {}) as Record<string, unknown>
+  if (toolName === 'Bash') return String(i.command ?? '')
+  if (toolName === 'Edit' || toolName === 'Write' || toolName === 'Read') {
+    return String(i.file_path ?? '')
+  }
+  try {
+    return JSON.stringify(input).slice(0, 100)
+  } catch {
+    return String(input)
+  }
+}
+
+// 权限询问 async generator helper（yield* 协调）。
+//   1. 先把 resolveFn 取出来（promise 创建时已绑好）
+//   2. yield permission_request 事件出去 —— 此时 generator 暂停，外层 Repl 拿到事件
+//   3. Repl 显示弹窗、用户按 y/n 后调 resolveFn(decision) —— promise resolve
+//   4. generator 恢复，return decision
+// 关键：yield 出去后 generator 真正暂停（for await 消费者侧不 next 就不会继续），
+// 所以 await decisionPromise 必然在 resolve 被调用之后才完成。
+async function* askPermission(
+  toolName: string,
+  input: unknown,
+): AsyncGenerator<QueryEvent, PermissionUserDecision> {
+  let resolveFn!: (d: PermissionUserDecision) => void
+  const decisionPromise = new Promise<PermissionUserDecision>(
+    (r) => {
+      resolveFn = r
+    },
+  )
+  const inputSummary = summarizeInput(toolName, input)
+  yield {
+    type: 'permission_request',
+    tool: toolName,
+    input,
+    inputSummary,
+    resolve: resolveFn,
+  }
+  return await decisionPromise
 }
 
 export async function* queryLoop(
@@ -164,6 +213,61 @@ export async function* queryLoop(
           }
           continue
         }
+
+        // M4：执行前权限检查
+        const perm = await checkPermission({
+          tool,
+          input: tu.input,
+          ctx: {
+            cwd: opts.cwd,
+            abortSignal: opts.signal,
+            readFileState,
+          },
+          permissionMode: opts.permissionMode ?? 'default',
+          rules: opts.permissions ?? { allow: [], ask: [], deny: [] },
+        })
+
+        // deny：直接拒绝，回灌给模型（不执行）
+        if (perm.decision === 'deny') {
+          const content = `权限拒绝: ${perm.reason ?? '匹配 deny 规则'}`
+          toolResultBlocks.push({
+            type: 'tool_result',
+            tool_use_id: tu.id,
+            content,
+            is_error: true,
+          })
+          yield {
+            type: 'tool_result',
+            tool: tu.name,
+            ok: false,
+            content,
+          }
+          continue
+        }
+
+        // ask：yield permission_request 等用户回复（yield* 协调 askPermission）
+        if (perm.decision === 'ask') {
+          const userDecision = yield* askPermission(tu.name, tu.input)
+          if (userDecision === 'deny') {
+            const content = `用户拒绝执行 ${tu.name}`
+            toolResultBlocks.push({
+              type: 'tool_result',
+              tool_use_id: tu.id,
+              content,
+              is_error: true,
+            })
+            yield {
+              type: 'tool_result',
+              tool: tu.name,
+              ok: false,
+              content,
+            }
+            continue
+          }
+          // allow → 继续往下执行工具
+        }
+
+        // allow（或用户回复 allow）→ 执行
         const result = await tool.execute(tu.input, {
           cwd: opts.cwd,
           abortSignal: opts.signal,

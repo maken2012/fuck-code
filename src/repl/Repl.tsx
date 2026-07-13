@@ -2,6 +2,9 @@
 // M2 REPL：欢迎框 + 输入框 + 流式对话历史。
 // 回车把文本喂给 queryLoop，流式累积 assistant 文本。
 // Ctrl+C 运行中中断当前轮次，空闲时退出。
+//
+// M4：工具执行前若 queryLoop yield permission_request，渲染权限弹窗，
+//   用户按 y/n 后调 resolve('allow'|'deny') 让 queryLoop 继续。
 import React, { useState, useRef, useEffect } from 'react'
 import { Box, Text, useInput, useApp } from 'ink'
 import type { ChatMessage } from '@/llm/types.js'
@@ -9,6 +12,8 @@ import { queryLoop } from '@/agent/queryLoop.js'
 import { buildSystemPrompt } from '@/agent/systemPrompt.js'
 import { getAllTools } from '@/tools/registry.js'
 import { getConfig } from '@/services/runtime.js'
+import type { PermissionMode } from '@/permissions/modes.js'
+import type { PermissionUserDecision } from '@/agent/types.js'
 
 export interface ReplProps {
   version?: string
@@ -20,19 +25,33 @@ interface DisplayMessage {
   text: string
 }
 
+// M4：权限弹窗的待处理状态。resolve 是 queryLoop 注入的回调，
+// 用户回复后调一次 resolve 让 queryLoop 的 await 解除阻塞。
+interface PendingPermission {
+  tool: string
+  summary: string
+  resolve: (d: PermissionUserDecision) => void
+}
+
 export function Repl({ version = '0.1.0', modelName }: ReplProps) {
   const { exit } = useApp()
   const [input, setInput] = useState('')
   const [history, setHistory] = useState<DisplayMessage[]>([])
   const [running, setRunning] = useState(false)
   const [configLoaded, setConfigLoaded] = useState(false)
+  const [pendingPermission, setPendingPermission] =
+    useState<PendingPermission | null>(null)
   const chatHistoryRef = useRef<ChatMessage[]>([])
   const abortRef = useRef<AbortController | null>(null)
   const configRef = useRef<{
     model: string
     apiKey?: string
     maxTokens: number
+    permissionMode: PermissionMode
+    permissions: { allow: string[]; ask: string[]; deny: string[] }
   } | null>(null)
+  // 持有 pendingPermission 的最新引用（useInput 闭包读不到 React 最新 state）
+  const pendingPermissionRef = useRef<PendingPermission | null>(null)
 
   // 启动时读一次 config（异步，失败用默认值）
   useEffect(() => {
@@ -42,12 +61,16 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
           model: c.value.model,
           apiKey: c.value.apiKey,
           maxTokens: c.value.maxTokens,
+          permissionMode: c.value.permissionMode,
+          permissions: c.value.permissions,
         }
       })
       .catch(() => {
         configRef.current = {
           model: 'claude-sonnet-4-5-20250929',
           maxTokens: 8192,
+          permissionMode: 'default',
+          permissions: { allow: [], ask: [], deny: [] },
         }
       })
       .finally(() => setConfigLoaded(true))
@@ -57,6 +80,8 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
     const config = configRef.current ?? {
       model: 'claude-sonnet-4-5-20250929',
       maxTokens: 8192,
+      permissionMode: 'default' as PermissionMode,
+      permissions: { allow: [], ask: [], deny: [] },
     }
     const ac = new AbortController()
     abortRef.current = ac
@@ -81,6 +106,9 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
         apiKey: config.apiKey,
         cwd: process.cwd(),
         tools: getAllTools(),
+        // M4：传权限模式 + 规则给 queryLoop，工具执行前调 checkPermission
+        permissionMode: config.permissionMode,
+        permissions: config.permissions,
       })) {
         switch (event.type) {
           case 'text_delta':
@@ -109,6 +137,18 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
               ...h,
               { role: 'assistant', text: note },
             ])
+            break
+          }
+          case 'permission_request': {
+            // 设置 pendingPermission 状态：弹窗渲染 + useInput 接管输入等 y/n
+            // 同时写 ref（useInput 闭包读 ref，避免 stale state）
+            const pending: PendingPermission = {
+              tool: event.tool,
+              summary: event.inputSummary,
+              resolve: event.resolve,
+            }
+            pendingPermissionRef.current = pending
+            setPendingPermission(pending)
             break
           }
           case 'turn_end':
@@ -158,10 +198,42 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
     } finally {
       setRunning(false)
       abortRef.current = null
+      // 兜底：异常退出（如 queryLoop 抛错）时若 pendingPermission 残留，
+      // resolve('deny') 让任何 await 中的 promise 解除阻塞，避免挂死。
+      if (pendingPermissionRef.current) {
+        pendingPermissionRef.current.resolve('deny')
+        pendingPermissionRef.current = null
+        setPendingPermission(null)
+      }
     }
   }
 
   useInput((inputChar, key) => {
+    // 权限弹窗激活时接管输入：只接 y/n（大小写都行），其他键忽略。
+    // 读 ref 而非 state（useInput 闭包持有的是首次注册时的 state，看不到后续更新）。
+    const pending = pendingPermissionRef.current
+    if (pending) {
+      if (inputChar === 'y' || inputChar === 'Y') {
+        pending.resolve('allow')
+        pendingPermissionRef.current = null
+        setPendingPermission(null)
+        return
+      }
+      if (inputChar === 'n' || inputChar === 'N') {
+        pending.resolve('deny')
+        pendingPermissionRef.current = null
+        setPendingPermission(null)
+        return
+      }
+      // Ctrl+C 在弹窗中视为拒绝（让用户能快速 escape）
+      if (key.ctrl && (inputChar === 'c' || inputChar === 'd')) {
+        pending.resolve('deny')
+        pendingPermissionRef.current = null
+        setPendingPermission(null)
+        return
+      }
+      return // 其他键忽略，继续等 y/n
+    }
     // Ctrl+C / Ctrl+D：运行中中断，空闲退出
     if (key.ctrl && (inputChar === 'c' || inputChar === 'd')) {
       if (running && abortRef.current) {
@@ -226,11 +298,29 @@ export function Repl({ version = '0.1.0', modelName }: ReplProps) {
         {!running && <Text color="gray">▋</Text>}
       </Box>
 
+      {pendingPermission && (
+        <Box
+          marginTop={1}
+          flexDirection="column"
+          borderStyle="round"
+          borderColor="yellow"
+          paddingX={1}
+        >
+          <Text color="yellow" bold>
+            ⚠ 权限请求：{pendingPermission.tool} 要执行
+          </Text>
+          <Text>{pendingPermission.summary.slice(0, 80)}</Text>
+          <Text dimColor>允许？[y=允许 / n=拒绝 / Ctrl+C=拒绝]</Text>
+        </Box>
+      )}
+
       <Box marginTop={1}>
         <Text dimColor>
-          {running
-            ? '正在生成... Ctrl+C 中断当前轮次'
-            : 'Ctrl+C 退出 · 输入 /clear 清空上下文 · /exit 退出'}
+          {pendingPermission
+            ? '等待权限确认...'
+            : running
+              ? '正在生成... Ctrl+C 中断当前轮次'
+              : 'Ctrl+C 退出 · 输入 /clear 清空上下文 · /exit 退出'}
         </Text>
       </Box>
     </Box>

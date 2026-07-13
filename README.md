@@ -2,7 +2,7 @@
 
 > 原生中文交互的终端 AI 编码工具。目标是从需求到开发测试的完整流程都能在一个工具里完成。
 
-**当前状态：v0.1.0 MVP 完成** — 从需求理解到代码修改、命令执行、会话持久化的完整编码 agent 已就绪。设置 ANTHROPIC_API_KEY 即可使用。
+**当前状态：v0.2（133 tests）** — 新增一次性模式、plan 计划模式、Task 子 agent。从需求分析到代码探索的完整流程已就绪。
 
 ## 快速开始
 
@@ -134,6 +134,10 @@ bun run dev           # 启动 REPL
 | **M4 写工具 + 权限** | Write/Edit/Bash + 权限决策管线 + ask 弹窗 | ✅ |
 | **M5 会话 + 压缩** | JSONL 存储 + 会话恢复 + autoCompact | ✅ |
 | **M6 打磨发布** | prompt cache + /cost/help + 网络重试 + 错误加固 | ✅ |
+| **v0.2a 一次性模式** | runOnce + stdin 管道 + --plan flag | ✅ |
+| **v0.2b plan 计划模式** | /plan 命令 + 五段式实施计划输出 | ✅ |
+| **v0.2c Task 子 agent** | 派子 agent 隔离探索/调研（explore/general） | ✅ |
+| v0.3+ | MCP 客户端 / 插件系统 / 工作流层 | ⬜ |
 
 完整设计见 [MVP 设计文档](docs/superpowers/specs/2026-07-13-fuckcode-mvp-design.md)，M1 实现计划见 [M1 计划文档](docs/superpowers/plans/2026-07-13-fuckcode-m1-skeleton.md)。
 

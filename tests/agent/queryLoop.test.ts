@@ -827,3 +827,58 @@ test('M5 autoCompact：无 sessionId 时即使超阈值也不触发压缩', asyn
   }
   expect(events.find((e) => e.type === 'compacted')).toBeUndefined()
 })
+
+// v1.2: 并发执行测试——多个并发安全工具应并行
+test('v1.2: 多个并发安全工具并行执行（总耗时 < 串行）', async () => {
+  const executionTimes: number[] = []
+  const mockTools = [
+    {
+      name: 'FastRead1', description: 'd', prompt: 'p',
+      inputSchema: { parse: (x: unknown) => x, safeParse: () => ({ success: true, data: {} }) } as any,
+      isReadOnly: () => true, isConcurrencySafe: () => true,
+      jsonSchema: { type: 'object' },
+      execute: async () => {
+        const start = Date.now()
+        await new Promise((r) => setTimeout(r, 200))
+        executionTimes.push(Date.now() - start)
+        return { ok: true, data: 'r1' } as const
+      },
+    },
+    {
+      name: 'FastRead2', description: 'd', prompt: 'p',
+      inputSchema: { parse: (x: unknown) => x, safeParse: () => ({ success: true, data: {} }) } as any,
+      isReadOnly: () => true, isConcurrencySafe: () => true,
+      jsonSchema: { type: 'object' },
+      execute: async () => {
+        const start = Date.now()
+        await new Promise((r) => setTimeout(r, 200))
+        executionTimes.push(Date.now() - start)
+        return { ok: true, data: 'r2' } as const
+      },
+    },
+  ]
+  const startTotal = Date.now()
+  let call = 0
+  for await (const _ of queryLoop({
+    history: [], userInput: 'test', model: 'm', system: 's', cwd: '/tmp',
+    signal: new AbortController().signal,
+    tools: mockTools as any,
+    permissionMode: 'bypassPermissions',
+    _llmOverride: (async function* () {
+      call++
+      if (call === 1) {
+        yield { type: 'tool_use', toolName: 'FastRead1', toolUseId: 't1', input: {} }
+        yield { type: 'tool_use', toolName: 'FastRead2', toolUseId: 't2', input: {} }
+        yield { type: 'done', stopReason: 'tool_use' }
+      } else {
+        yield { type: 'text', textDelta: 'done' }
+        yield { type: 'done', stopReason: 'end_turn' }
+      }
+    }) as any,
+  })) {
+    void _
+  }
+  const totalMs = Date.now() - startTotal
+  // 并行：两个 200ms 工具应 < 500ms（串行会 400ms+，并行 ~200ms，留余量）
+  expect(totalMs).toBeLessThan(450)
+})

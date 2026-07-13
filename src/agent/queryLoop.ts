@@ -327,103 +327,84 @@ export async function* queryLoop(
       messages.push(assistantMsg)
       pendingPersist.push(assistantMsg)
 
-      // 执行所有工具，收集结果。工具执行错误不终止循环（把错误回灌给模型）
+      // v1.2: 执行所有工具——并发安全工具并行，非并发工具串行
+      // 策略：先串行做权限检查（含 ask 用户交互），收集 allow 的工具调用；
+      // 然后并发安全的用 Promise.all 并行，非并发安全的依次执行。
+      // 工具执行错误不终止循环（把错误回灌给模型）
       const toolResultBlocks: ContentBlock[] = []
+      // 先收集权限通过的工具调用（按原始顺序）
+      const permitted: { tu: { id: string; name: string; input: unknown }; tool: Tool }[] = []
       for (const tu of toolUses) {
         const tool = findTool(tu.name, tools)
         if (!tool) {
           const content = `错误：未知工具 ${tu.name}`
-          toolResultBlocks.push({
-            type: 'tool_result',
-            tool_use_id: tu.id,
-            content,
-            is_error: true,
-          })
-          yield {
-            type: 'tool_result',
-            tool: tu.name,
-            ok: false,
-            content,
-          }
+          toolResultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content, is_error: true })
+          yield { type: 'tool_result', tool: tu.name, ok: false, content }
           continue
         }
 
-        // M4：执行前权限检查
+        // 权限检查
         const perm = await checkPermission({
           tool,
           input: tu.input,
-          ctx: {
-            cwd: opts.cwd,
-            abortSignal: opts.signal,
-            readFileState,
-          },
+          ctx: { cwd: opts.cwd, abortSignal: opts.signal, readFileState },
           permissionMode: opts.permissionMode ?? 'default',
           rules: opts.permissions ?? { allow: [], ask: [], deny: [] },
         })
-
-        // deny：直接拒绝，回灌给模型（不执行）
         if (perm.decision === 'deny') {
           const content = `权限拒绝: ${perm.reason ?? '匹配 deny 规则'}`
-          toolResultBlocks.push({
-            type: 'tool_result',
-            tool_use_id: tu.id,
-            content,
-            is_error: true,
-          })
-          yield {
-            type: 'tool_result',
-            tool: tu.name,
-            ok: false,
-            content,
-          }
+          toolResultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content, is_error: true })
+          yield { type: 'tool_result', tool: tu.name, ok: false, content }
           continue
         }
-
-        // ask：yield permission_request 等用户回复（yield* 协调 askPermission）
         if (perm.decision === 'ask') {
           const userDecision = yield* askPermission(tu.name, tu.input)
           if (userDecision === 'deny') {
             const content = `用户拒绝执行 ${tu.name}`
-            toolResultBlocks.push({
-              type: 'tool_result',
-              tool_use_id: tu.id,
-              content,
-              is_error: true,
-            })
-            yield {
-              type: 'tool_result',
-              tool: tu.name,
-              ok: false,
-              content,
-            }
+            toolResultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content, is_error: true })
+            yield { type: 'tool_result', tool: tu.name, ok: false, content }
             continue
           }
-          // allow → 继续往下执行工具
         }
+        permitted.push({ tu, tool })
+      }
 
-        // allow（或用户回复 allow）→ 执行
-        const result = await tool.execute(tu.input, {
-          cwd: opts.cwd,
-          abortSignal: opts.signal,
-          readFileState,
-        })
-        const content = result.ok
-          ? (tool.formatResult
-              ? tool.formatResult(result.data)
-              : JSON.stringify(result.data))
-          : `错误: ${result.error}`
-        toolResultBlocks.push({
-          type: 'tool_result',
-          tool_use_id: tu.id,
-          content,
-          is_error: result.ok ? undefined : true,
-        })
-        yield {
-          type: 'tool_result',
-          tool: tu.name,
-          ok: result.ok,
-          content,
+      // 分组：并发安全 vs 串行（保持原顺序）
+      const concurrencySafe: typeof permitted = []
+      const serial: typeof permitted = []
+      for (const p of permitted) {
+        if (p.tool.isConcurrencySafe?.()) concurrencySafe.push(p)
+        else serial.push(p)
+      }
+
+      // 并发安全工具并行执行
+      if (concurrencySafe.length > 0) {
+        const results = await Promise.all(
+          concurrencySafe.map(async ({ tu, tool }) => {
+            const result = await tool.execute(tu.input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState })
+            return { tu, tool, result }
+          }),
+        )
+        // 按 tool_use 原始顺序回灌（保证模型看到顺序一致）
+        const orderMap = new Map(toolUses.map((tu, i) => [tu.id, i]))
+        results.sort((a, b) => (orderMap.get(a.tu.id) ?? 0) - (orderMap.get(b.tu.id) ?? 0))
+        for (const { tu, tool, result } of results) {
+          const content = result.ok
+            ? (tool.formatResult ? tool.formatResult(result.data) : JSON.stringify(result.data))
+            : `错误: ${result.error}`
+          toolResultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content, is_error: result.ok ? undefined : true })
+          yield { type: 'tool_result', tool: tu.name, ok: result.ok, content }
         }
+      }
+
+      // 串行工具依次执行（非并发安全：Write/Edit/Bash/Task 等）
+      for (const { tu, tool } of serial) {
+        const result = await tool.execute(tu.input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState })
+        const content = result.ok
+          ? (tool.formatResult ? tool.formatResult(result.data) : JSON.stringify(result.data))
+          : `错误: ${result.error}`
+        toolResultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content, is_error: result.ok ? undefined : true })
+        yield { type: 'tool_result', tool: tu.name, ok: result.ok, content }
       }
 
       // tool_result 拼回 messages（结构化 user content），继续下一轮

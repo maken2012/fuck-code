@@ -1,9 +1,8 @@
 // src/agent/planPrompt.ts
-// plan 模式的专用 system prompt 增强器。叠在 buildSystemPrompt 之上，
-// 引导模型做"需求理解 → 技术方案 → 任务拆解 → 风险评估"的结构化输出。
-//
-// plan 模式下：只读工具可用（Read/Glob/Grep），写工具被权限管线 deny，
-// 模型输出一份可执行的实施计划，不直接改代码。用户 review 计划后再切回正常模式执行。
+// plan 模式的专用 system prompt 增强器。
+// 深度比对第 30 轮: 计划文件持久化 + plan 完成提示 + Bash 只读命令允许
+import { writeFile, mkdir } from 'node:fs/promises'
+import { resolve } from 'node:path'
 
 export const PLAN_MODE_INSTRUCTION = `
 # 当前运行在 PLAN（计划）模式
@@ -47,4 +46,39 @@ export const PLAN_MODE_INSTRUCTION = `
 - 引用代码时给出 file_path:line_number
 - 如果需求本身有问题（矛盾、不可行、有更好替代），直接指出
 - 计划是给后续执行用的——写清楚到另一个开发者（或你自己切回执行模式后）能照着做
+- **完成后提示用户**：计划产出后，建议用户用 /workflow 或直接对话来执行计划
 `
+
+// 深度比对第 30 轮: 计划文件持久化（对标 opencode .opencode/plans/*.md）
+export async function savePlan(cwd: string, requirement: string, plan: string): Promise<string> {
+  const plansDir = resolve(cwd, '.fuckcode', 'plans')
+  await mkdir(plansDir, { recursive: true })
+  const timestamp = Date.now()
+  const date = new Date(timestamp).toISOString().slice(0, 19).replace(/[:.]/g, '-')
+  const shortName = requirement.slice(0, 30).replace(/[^\w\u4e00-\u9fa5]/g, '_')
+  const fileName = `${date}-${shortName}.md`
+  const filePath = resolve(plansDir, fileName)
+  const content = `# 实施计划：${requirement}
+
+> 生成时间：${new Date(timestamp).toLocaleString('zh-CN')}
+> 模式：PLAN
+
+${plan}
+`
+  await writeFile(filePath, content, 'utf8')
+  return filePath
+}
+
+// 深度比对第 30 轮: plan 模式下允许的只读 Bash 命令（对标 opencode plan agent 工具白名单）
+export const PLAN_ALLOWED_BASH = [
+  'git status', 'git diff', 'git log', 'git branch', 'git show', 'git remote',
+  'ls', 'cat', 'head', 'tail', 'wc', 'file', 'find', 'which', 'echo',
+  'node --version', 'bun --version', 'npm --version', 'pnpm --version',
+  'tsc --version', 'rg --version',
+]
+
+export function isPlanAllowedBash(command: string): boolean {
+  const cmd = command.trim()
+  return PLAN_ALLOWED_BASH.some((allowed) => cmd.startsWith(allowed))
+}
+

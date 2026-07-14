@@ -476,13 +476,23 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         return copy
       })
     } finally {
-      // 流式节流兜底：确保最后的文本不丢
       if (flushTimerRef.current) {
         clearTimeout(flushTimerRef.current)
         flushTimerRef.current = null
       }
       setRunning(false)
       abortRef.current = null
+      // 深度比对第 30 轮: 计划文件持久化
+      if (planText.trim()) {
+        try {
+          const { savePlan } = await import('@/agent/planPrompt.js')
+          const planPath = await savePlan(process.cwd(), requirement, planText)
+          setHistory((h) => [...h, {
+            role: 'assistant' as const,
+            text: `\n---\n计划已保存: ${planPath}\n执行：/workflow ${requirement} 或直接对话实施`,
+          }])
+        } catch { void 0 }
+      }
     }
   }
 

@@ -62,7 +62,14 @@ export async function runOnce(opts: RunOnceOpts): Promise<void> {
     process.exit(130)
   })
 
-  process.stderr.write(`\x1b[2m模型: ${model} · 模式: ${permissionMode}\x1b[0m\n`)
+  // 深度比对第 32 轮: stdout 检测——管道时禁用 ANSI 颜色
+  const isTTY = process.stdout.isTTY
+  const dim = isTTY ? '\x1b[2m' : ''
+  const reset = isTTY ? '\x1b[0m' : ''
+  const yellow = isTTY ? '\x1b[33m' : ''
+  const red = isTTY ? '\x1b[31m' : ''
+
+  process.stderr.write(`${dim}模型: ${model} · 模式: ${permissionMode}${reset}\n`)
 
   // plan 模式：叠加计划指令到 system prompt，并在 prompt 前加引导
   const isPlan = permissionMode === 'plan'
@@ -91,39 +98,39 @@ export async function runOnce(opts: RunOnceOpts): Promise<void> {
     })) {
       switch (event.type) {
         case 'text_delta':
+          // 深度比对第 32 轮: stdout 纯文本（管道友好，对标 Claude Code -p）
           process.stdout.write(event.text)
           break
         case 'tool_use_start': {
-          // 工具调用用 dim 色显示在 stderr（不污染 stdout 的"答案"）
+          // 深度比对第 32 轮: 用 ASCII tag（对标 REPL 改造，去 emoji）
           const summary = summarizeTool(event.tool, event.input)
-          process.stderr.write(`\n\x1b[2m📖 ${event.tool}${summary ? `: ${summary}` : ''}\x1b[0m\n`)
+          process.stderr.write(`\n${dim}[${event.tool}]${summary ? ` ${summary}` : ''}${reset}\n`)
           break
         }
         case 'tool_result':
           if (!event.ok) {
-            process.stderr.write(`\x1b[33m✗ ${event.tool} 失败: ${event.content}\x1b[0m\n`)
+            process.stderr.write(`${yellow}[FAIL] ${event.tool}: ${event.content}${reset}\n`)
           }
           break
         case 'permission_request':
-          // 非交互模式不应走到 ask（acceptEdits 已跳过 ask），防御性处理
           event.resolve('deny')
-          process.stderr.write(`\x1b[33m⚠ 拒绝（非交互模式无法询问）: ${event.tool}\x1b[0m\n`)
+          process.stderr.write(`${yellow}[WARN] 非交互模式拒绝: ${event.tool}${reset}\n`)
           break
         case 'compacted':
-          process.stderr.write(`\x1b[2m[上下文已压缩]\x1b[0m\n`)
+          process.stderr.write(`${dim}[上下文已压缩]${reset}\n`)
           break
         case 'turn_end':
           break
         case 'usage': {
           const cost = event.input + event.output
-          process.stderr.write(`\n\x1b[2m[${cost} tokens · cache ${event.cacheRead}]\x1b[0m\n`)
+          process.stderr.write(`\n${dim}[${cost} tokens · cache ${event.cacheRead}]${reset}\n`)
           break
         }
         case 'error':
-          process.stderr.write(`\n\x1b[31m错误: ${event.error.message}\x1b[0m\n`)
+          process.stderr.write(`\n${red}错误: ${event.error.message}${reset}\n`)
           break
         case 'aborted':
-          process.stderr.write(`\n\x1b[33m[已中断]\x1b[0m\n`)
+          process.stderr.write(`\n${yellow}[已中断]${reset}\n`)
           break
         case 'done':
           break

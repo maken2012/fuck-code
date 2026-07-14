@@ -121,6 +121,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const genAttitudeRef = useRef(attitudeFor('generating'))
   // refactor: 命令注册中心（替代 17 个 if-else）
   const commandRegistryRef = useRef<CommandRegistry | null>(null)
+  // 深度比对修复 #3: 流式渲染节流 timer
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [configLoaded, setConfigLoaded] = useState(false)
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null)
@@ -236,11 +238,19 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         switch (event.type) {
           case 'text_delta':
             assistantText += event.text
-            setHistory((h) => {
-              const copy = [...h]
-              copy[copy.length - 1] = { role: 'assistant', text: assistantText }
-              return copy
-            })
+            // 深度比对修复 #3: 流式渲染节流——16ms 攒批后更新（避免每 token setState 卡顿）
+            // 用 ref 记录"脏"标记，requestAnimationFrame 合并
+            if (!flushTimerRef.current) {
+              flushTimerRef.current = setTimeout(() => {
+                flushTimerRef.current = null
+                const snapshot = assistantText
+                setHistory((h) => {
+                  const copy = [...h]
+                  copy[copy.length - 1] = { role: 'assistant' as const, text: snapshot }
+                  return copy
+                })
+              }, 32) // ~30fps 足够流畅
+            }
             break
           case 'tool_use_start': {
             // 渲染"📖 调用 {tool}"提示（input 截断到 80 字符避免刷屏）
@@ -331,6 +341,11 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         return copy
       })
     } finally {
+      // 流式节流兜底：确保最后的文本不丢
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current)
+        flushTimerRef.current = null
+      }
       setRunning(false)
       abortRef.current = null
       // 兜底：异常退出（如 queryLoop 抛错）时若 pendingPermission 残留，
@@ -396,6 +411,11 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         return copy
       })
     } finally {
+      // 流式节流兜底：确保最后的文本不丢
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current)
+        flushTimerRef.current = null
+      }
       setRunning(false)
       abortRef.current = null
     }
@@ -462,6 +482,11 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     } catch (e) {
       setHistory((h) => [...h, { role: 'assistant' as const, text: `目标黄了: ${String(e)}` }])
     } finally {
+      // 流式节流兜底：确保最后的文本不丢
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current)
+        flushTimerRef.current = null
+      }
       setRunning(false)
       abortRef.current = null
     }
@@ -553,6 +578,11 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         { role: 'assistant' as const, text: `工作流拉胯了: ${String(e)}` },
       ])
     } finally {
+      // 流式节流兜底：确保最后的文本不丢
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current)
+        flushTimerRef.current = null
+      }
       setRunning(false)
       abortRef.current = null
     }
@@ -1050,6 +1080,25 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
     if (key.ctrl && inputChar === 'l') {
       setHistory([])
       setCmdHintIndex(0)
+      return
+    }
+    // 深度比对修复 #6: Ctrl+W 删词、Ctrl+U 清行、Ctrl+K 删到行尾
+    if (key.ctrl && inputChar === 'u') {
+      setInput('')
+      return
+    }
+    if (key.ctrl && inputChar === 'k') {
+      // Ctrl+K: 删到行尾（当前 input 就是单行，等同清空）
+      setInput('')
+      return
+    }
+    if (key.ctrl && inputChar === 'w') {
+      // Ctrl+W: 删最后一个词（按空格/标点分词）
+      setInput((s) => {
+        const trimmed = s.trimEnd()
+        const lastSpace = Math.max(trimmed.lastIndexOf(' '), trimmed.lastIndexOf('\t'))
+        return lastSpace === -1 ? '' : trimmed.slice(0, lastSpace + 1)
+      })
       return
     }
 

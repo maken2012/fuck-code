@@ -105,6 +105,20 @@ export async function appendMessages(
   if (meta) {
     meta.messageCount += messages.length
     if (messages.length > 0) meta.lastMessageAt = Date.now()
+    // 深度比对修复 #9: 首条 user 消息自动生成标题（截前 40 字）
+    if (meta.title === '新会话') {
+      const firstUser = messages.find((m) => m.role === 'user')
+      if (firstUser) {
+        const text = typeof firstUser.content === 'string'
+          ? firstUser.content
+          : Array.isArray(firstUser.content)
+            ? (firstUser.content.find((b) => b.type === 'text') as { text?: string } | undefined)?.text ?? ''
+            : ''
+        if (text.trim()) {
+          meta.title = text.trim().slice(0, 40) + (text.length > 40 ? '...' : '')
+        }
+      }
+    }
     await writeIndex(cwd, sessions)
   }
 }

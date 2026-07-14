@@ -116,6 +116,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     model: string
     apiKey?: string
     apiBaseUrl?: string
+    provider?: 'anthropic' | 'openai' | 'openai-compatible'
     fallbackModels?: string[]
     maxTokens: number
     contextWindow: number
@@ -136,6 +137,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           model: initialModel ?? c.value.model,
           apiKey: initialApiKey ?? c.value.apiKey,
           apiBaseUrl: initialApiBaseUrl ?? c.value.apiBaseUrl,
+          provider: c.value.provider,
           fallbackModels: c.value.fallbackModels,
           maxTokens: c.value.maxTokens,
           contextWindow: c.value.contextWindow,
@@ -191,6 +193,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         signal: ac.signal,
         apiKey: config.apiKey,
         ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+        ...(config.provider ? { provider: config.provider } : {}),
         ...(config.fallbackModels ? { fallbackModels: config.fallbackModels } : {}),
         cwd: process.cwd(),
         tools: getAllTools(),
@@ -341,6 +344,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         signal: ac.signal,
         apiKey: config.apiKey,
         ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+        ...(config.provider ? { provider: config.provider } : {}),
         ...(config.fallbackModels ? { fallbackModels: config.fallbackModels } : {}),
         cwd: process.cwd(),
         tools: getAllTools(),
@@ -387,6 +391,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         model: currentModel,
         apiKey: config.apiKey,
         ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+        ...(config.provider ? { provider: config.provider } : {}),
         ...(config.fallbackModels ? { fallbackModels: config.fallbackModels } : {}),
         signal: ac.signal,
         cwd: process.cwd(),
@@ -461,6 +466,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         model: currentModel,
         apiKey: config.apiKey,
         ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+        ...(config.provider ? { provider: config.provider } : {}),
         signal: ac.signal,
         cwd: process.cwd(),
         config: {

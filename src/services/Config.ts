@@ -13,6 +13,7 @@ export const ConfigSchema = z.object({
   fallbackModels: z.array(z.string()).default([]).describe('主模型过载/429 时按序尝试的备用模型（最多 3 个）'),
   apiKey: z.string().optional(),
   apiBaseUrl: z.string().optional().describe('Anthropic 兼容 API 的 baseURL（第三方中转/代理）'),
+  provider: z.enum(['anthropic', 'openai', 'openai-compatible']).optional().describe('强制指定 provider（覆盖自动判定，用 MiniMax 等 Anthropic 兼容服务时设 anthropic'),
   permissions: z
     .object({
       allow: z.array(z.string()).default([]),

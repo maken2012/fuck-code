@@ -90,6 +90,8 @@ export interface QueryLoopOpts {
   apiBaseUrl?: string
   /** v1.11：主模型过载/429 时按序尝试的备用模型 */
   fallbackModels?: string[]
+  /** v1.13：强制指定 provider（覆盖 detectProvider 自动判定） */
+  provider?: 'anthropic' | 'openai' | 'openai-compatible'
   /** M3：工作目录（工具执行需要） */
   cwd: string
   /** M3：可用工具列表（不传则禁用工具，退化为 M2 单轮） */
@@ -230,6 +232,7 @@ export async function* queryLoop(
           model: opts.model,
           apiKey: opts.apiKey,
           ...(opts.apiBaseUrl ? { apiBaseUrl: opts.apiBaseUrl } : {}),
+          ...(opts.provider ? { provider: opts.provider } : {}),
           signal: opts.signal,
           _llmOverride: opts._llmOverride,
         }).catch(() => '')
@@ -279,6 +282,7 @@ export async function* queryLoop(
         apiKey: opts.apiKey,
         ...(opts.apiBaseUrl ? { apiBaseUrl: opts.apiBaseUrl } : {}),
         ...(opts.fallbackModels ? { fallbackModels: opts.fallbackModels } : {}),
+        ...(opts.provider ? { provider: opts.provider } : {}),
         systemCacheable: true, // M6: 启用 prompt cache，system 静态段跨轮命中
       }
       if (hasTools) {

@@ -1332,7 +1332,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
     reg.register(
       { cmd: '/version', desc: '显示版本号', args: '', example: '/version' },
       () => {
-        setHistory((h) => [...h, { role: 'assistant' as const, text: `fuckcode v${VERSION}` }])
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `fuckcode v${version}` }])
         setInput('')
         setCursorOffset(0)
       },

@@ -99,9 +99,11 @@ export const EditTool = buildTool<EditInputType>({
       }
 
       // 执行替换
+      // 用 split/join 而非 String.replace——replace 会把 old_string 当正则解析，
+      // 含 . * ( $ \ 时会错配。replaceAll 用函数替换元避免 $ 特殊语义。
       const newContent = replaceAll
         ? content.split(old_string).join(new_string)
-        : content.replace(old_string, new_string)
+        : content.replace(old_string, () => new_string)
 
       // v1.6: 写前 checkpoint 备份（失败不阻塞编辑，/rewind 可回滚）
       await checkpoint(ctx.cwd, file_path).catch(() => {})

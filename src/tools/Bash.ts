@@ -105,6 +105,29 @@ export const BashTool = buildTool<BashInputType>({
     }
     // done
     if (outcome.exitCode !== 0 && outcome.exitCode !== null) {
+      // 语义豁免：某些命令 exit 1 不是错误
+      const cmd = input.command.trim()
+      const firstWord = cmd.split(/\s+/)[0] ?? ''
+      const isGitDiff = /^(git|diff)\b/.test(cmd)
+      const isGrep = /^(grep|rg|ag)\b/.test(firstWord)
+      const isTest = /\.(test|spec)\.|(test|vitest|jest)\b/.test(cmd)
+
+      if (isGitDiff && outcome.exitCode === 1) {
+        // git diff 有差异 exit 1 = 正常（有 diff 输出）
+        return { ok: true, data: outcomeToData(outcome) || '(无差异)' }
+      }
+      if (isGrep && outcome.exitCode === 1) {
+        // grep/rg 无匹配 exit 1 = 正常
+        return { ok: true, data: '(无匹配)' }
+      }
+      if (isTest && outcome.exitCode !== 0) {
+        // 测试失败 exit != 0：不是命令错误，是测试断言失败
+        return {
+          ok: false,
+          error: `测试失败（exit ${outcome.exitCode}）:\n${(outcome.stdout ?? '').slice(0, 2000)}`,
+          isError: true,
+        }
+      }
       return {
         ok: false,
         error: `命令退出码 ${outcome.exitCode}${outcome.stderr ? `: ${outcome.stderr.slice(0, 500)}` : ''}`,

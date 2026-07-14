@@ -45,7 +45,9 @@ export const GrepTool = buildTool<GrepInputType>({
       const args = ['--line-number', '--no-heading', '--color=never']
       if (input.ignore_case) args.push('-i')
       if (input.glob) args.push('-g', input.glob)
-      args.push(input.pattern)
+      // pattern 以 - 开头时加 -e 防止 rg 当 option 解析
+      if (input.pattern.startsWith('-')) args.push('-e', input.pattern)
+      else args.push(input.pattern)
       args.push(input.path ?? ctx.cwd)
 
       const proc = spawn('rg', args, { cwd: ctx.cwd })

@@ -45,9 +45,43 @@ export const ReadTool = buildTool<ReadInputType>({
       if (!stats.isFile()) {
         return { ok: false, error: `${input.file_path} 不是文件（可能是目录）`, isError: true }
       }
-      const content = await readFile(input.file_path, 'utf8')
+
+      // 深度比对修复 #1：设备文件防护（防 /dev/zero 等导致 hang）
+      const BLOCKED_DEVICES = ['/dev/zero', '/dev/random', '/dev/urandom', '/dev/null', '/dev/stdin', '/dev/full']
+      if (BLOCKED_DEVICES.some((d) => input.file_path.startsWith(d))) {
+        return { ok: false, error: `拒绝读取设备文件 ${input.file_path}（会导致 hang）`, isError: true }
+      }
+
+      // 大文件字节上限（256KB，防 minified/base64 爆 context）
+      const MAX_BYTES = 256 * 1024
+      if (stats.size > MAX_BYTES) {
+        return {
+          ok: false,
+          error: `文件 ${stats.size} 字节超限（max ${MAX_BYTES}）。用 offset/limit 只读部分，或用 Grep 搜索关键内容。`,
+          isError: true,
+        }
+      }
+
+      const buf = await readFile(input.file_path)
+      const content = buf.toString('utf8')
+
+      // 二进制检测：扫前 8192 字节，NUL 字节或非打印字符 >30% 判定二进制
+      const sampleSize = Math.min(buf.length, 8192)
+      let nonPrintable = 0
+      for (let i = 0; i < sampleSize; i++) {
+        const byte = buf[i]!
+        if (byte === 0) { nonPrintable = sampleSize + 1; break } // NUL 字节立即判定
+        if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) nonPrintable++
+      }
+      if (nonPrintable > sampleSize * 0.3) {
+        return {
+          ok: false,
+          error: `${input.file_path} 是二进制文件（${stats.size} 字节），不支持文本读取。`,
+          isError: true,
+        }
+      }
+
       const lines = content.split('\n')
-      // 文件以 \n 结尾时 split 产生末尾空串，去掉它（保留真正的空行）
       if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
 
       const offset = input.offset ?? 1

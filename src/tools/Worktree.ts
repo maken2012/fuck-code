@@ -51,6 +51,7 @@ export const EnterWorktreeTool = buildTool<EnterWorktreeInputType>({
 - branch（可选）：新分支名，默认 fc-worktree-<timestamp>
 
 创建后工作目录切换到新 worktree。用 ExitWorktree 回到主目录。
+非 git 仓库降级为普通子目录（无分支隔离）。
 非 git 仓库降级为普通子目录（无分支隔离）。`,
   inputSchema: EnterWorktreeInput,
   jsonSchema: {

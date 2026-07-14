@@ -14,7 +14,9 @@ type SkillInputType = z.infer<typeof SkillInput>
 export const SkillTool = buildTool<SkillInputType>({
   name: 'Skill',
   description: '加载某个 skill 的详细内容',
-  prompt: `加载一个 skill 的完整内容（领域知识、框架用法、调试流程等）。
+  prompt: `加载一个 skill 的完整内容。
+
+按需加载——启动时只注入 skill 名字+描述，需要详细知识时调此工具。
 
 参数：
 - name（必填）：skill 名（从 system prompt 里的"可用 Skill"列表选）

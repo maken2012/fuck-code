@@ -9,6 +9,7 @@
 import { readFile, writeFile, rename, stat } from 'node:fs/promises'
 import { buildTool } from '@/tools/Tool.js'
 import { checkpoint } from '@/tools/checkpoint.js'
+import { resolve } from 'node:path'
 import { z } from 'zod'
 
 const EditInput = z.object({
@@ -129,9 +130,39 @@ export const EditTool = buildTool<EditInputType>({
       })
 
       const replacedCount = replaceAll ? countOccurrences(content, actualOldString) : 1
+      // 深度比对第 35 轮: 编辑后自动类型检查（对标 Claude Code didChange/didSave → LSP diagnostics）
+      // 只对 .ts/.tsx 文件 + 有 node_modules/.bin/tsc 时触发（不阻塞，失败不报错）
+      let typeCheckHint = ''
+      if (/\.(ts|tsx|mts|cts)$/.test(file_path)) {
+        try {
+          const { spawn } = await import('node:child_process')
+          const { existsSync } = await import('node:fs')
+          const tscPath = resolve(ctx.cwd, 'node_modules', '.bin', 'tsc')
+          if (existsSync(tscPath)) {
+            const result = await new Promise<{ ok: boolean; output: string }>((r) => {
+              const proc = spawn(tscPath, ['--noEmit', '--pretty', 'false'], {
+                cwd: ctx.cwd, shell: true, timeout: 15000,
+              })
+              let out = ''
+              proc.stdout?.on('data', (d: Buffer) => { out += d.toString() })
+              proc.stderr?.on('data', (d: Buffer) => { out += d.toString() })
+              proc.on('close', (code) => r({ ok: code === 0, output: out }))
+              proc.on('error', () => r({ ok: true, output: '' })) // tsc 不可用不阻塞
+            })
+            if (!result.ok && result.output) {
+              // 找到本文件的错误行
+              const shortPath = file_path.replace(ctx.cwd + '/', '')
+              const fileErrors = result.output.split('\n').filter((l) => l.includes(shortPath))
+              if (fileErrors.length > 0) {
+                typeCheckHint = `\n\n[!] 编辑后有 ${fileErrors.length} 个类型错误:\n${fileErrors.slice(0, 5).join('\n')}`
+              }
+            }
+          }
+        } catch { /* 类型检查失败不阻塞编辑 */ }
+      }
       return {
         ok: true,
-        data: `已替换 ${file_path}（${replacedCount} 处）`,
+        data: `已替换 ${file_path}（${replacedCount} 处）${typeCheckHint}`,
       }
     } catch (e) {
       return { ok: false, error: `Edit 失败: ${(e as Error).message}`, isError: true }

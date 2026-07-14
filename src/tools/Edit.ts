@@ -107,12 +107,25 @@ export const EditTool = buildTool<EditInputType>({
       }
 
       // 唯一性：非 replace_all 时，actualOldString 必须唯一
+      // 深度比对第 65 轮: 多匹配时提供行号提示（对标 Claude Code actualOldString 位置提示）
       if (!replaceAll) {
         const occurrences = countOccurrences(content, actualOldString)
         if (occurrences > 1) {
+          // 找出匹配所在的行号
+          const lines = content.split('\n')
+          const matchLines: number[] = []
+          let searchFrom = 0
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines.slice(0, i + 1).join('\n').slice(searchFrom)
+            if (line.includes(actualOldString)) {
+              matchLines.push(i + 1)
+              searchFrom += line.indexOf(actualOldString) + actualOldString.length
+            }
+          }
+          const lineHint = matchLines.slice(0, 5).join(', ')
           return {
             ok: false,
-            error: `old_string 在文件中出现 ${occurrences} 次（要求唯一）。请提供更长的上下文或设 replace_all=true`,
+            error: `old_string 在文件中出现 ${occurrences} 次（行 ${lineHint}${occurrences > 5 ? '...' : ''}）。请提供更长的上下文使匹配唯一，或设 replace_all=true`,
             isError: true,
           }
         }

@@ -10,6 +10,7 @@ const GrepInput = z.object({
   pattern: z.string().describe('正则表达式或搜索词'),
   path: z.string().describe('搜索目录，默认 cwd').optional(),
   glob: z.string().describe('文件类型过滤，如 *.ts').optional(),
+  type: z.string().describe('按语言类型过滤（如 ts/js/py/go），比 glob 更高效').optional(),
   ignore_case: z.boolean().describe('忽略大小写').optional(),
   output_mode: z.enum(['files_with_matches', 'content', 'count']).describe(
     '输出模式：files_with_matches=只返回文件名（默认，省 token）；content=返回匹配行；count=返回每文件匹配数'
@@ -45,6 +46,7 @@ export const GrepTool = buildTool<GrepInputType>({
       ignore_case: { type: 'boolean', description: '忽略大小写' },
       output_mode: { type: 'string', enum: ['files_with_matches', 'content', 'count'], description: 'files_with_matches（默认）/ content / count' },
       head_limit: { type: 'integer', minimum: 0, description: '最大返回条数（默认 200）' },
+      type: { type: 'string', description: '语言类型（ts/js/py/go 等，比 glob 高效）' },
     },
     required: ['pattern'],
   },
@@ -62,6 +64,8 @@ export const GrepTool = buildTool<GrepInputType>({
 
       if (input.ignore_case) args.push('-i')
       if (input.glob) args.push('-g', input.glob)
+      // 深度比对第 65 轮: --type 语言过滤（对标 Claude Code GrepTool --type，比 glob 高效）
+      if (input.type) args.push('--type', input.type)
 
       // output_mode 对应 rg 参数
       if (outputMode === 'files_with_matches') args.push('-l')

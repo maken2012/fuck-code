@@ -16,6 +16,7 @@ import { buildSystemPrompt } from '@/agent/systemPrompt.js'
 import { PLAN_MODE_INSTRUCTION } from '@/agent/planPrompt.js'
 import { runWorkflow } from '@/agent/workflow.js'
 import type { WorkflowStage } from '@/agent/workflow.js'
+import { runGoal } from '@/agent/goalRunner.js'
 import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
 import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
 import { listCheckpoints, restoreCheckpoint } from '@/tools/checkpoint.js'
@@ -335,6 +336,71 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         copy[copy.length - 1] = { role: 'assistant' as const, text: `❌ 计划失败: ${String(e)}` }
         return copy
       })
+    } finally {
+      setRunning(false)
+      abortRef.current = null
+    }
+  }
+
+  // v1.11: /goal <条件> 目标驱动持续工作
+  async function runGoalTask(goal: string) {
+    const config = configRef.current ?? { model: 'claude-sonnet-4-5-20250929', maxTokens: 8192, contextWindow: 200000, permissionMode: 'default' as const, permissions: { allow: [], ask: [], deny: [] } }
+    const ac = new AbortController()
+    abortRef.current = ac
+    setRunning(true)
+    setHistory((h) => [...h, { role: 'user' as const, text: `🎯 [目标] ${goal}` }])
+    try {
+      for await (const event of runGoal({
+        goal,
+        model: currentModel,
+        apiKey: config.apiKey,
+        ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+        ...(config.fallbackModels ? { fallbackModels: config.fallbackModels } : {}),
+        signal: ac.signal,
+        cwd: process.cwd(),
+        config: { maxTokens: config.maxTokens, contextWindow: config.contextWindow, permissions: config.permissions },
+        sessionId: sessionId ?? undefined,
+        maxTurns: 10,
+      })) {
+        switch (event.type) {
+          case 'goal_start':
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `🎯 目标：${event.goal}（最多 ${event.maxTurns} 轮）\n` }])
+            break
+          case 'goal_turn_start':
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n--- 第 ${event.turn} 轮工作 ---\n` }, { role: 'assistant' as const, text: '' }])
+            break
+          case 'goal_work':
+            setHistory((h) => {
+              const copy = [...h]
+              const last = copy[copy.length - 1]
+              if (last && last.role === 'assistant') {
+                copy[copy.length - 1] = { role: 'assistant' as const, text: last.text + event.text }
+              }
+              return copy
+            })
+            break
+          case 'goal_tool':
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `  📖 ${event.tool}: ${event.summary}` }])
+            break
+          case 'goal_checking':
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n🔍 检查目标是否达成...` }])
+            break
+          case 'goal_achieved':
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n✅ 目标达成！（第 ${event.turn} 轮）` }])
+            break
+          case 'goal_max_turns':
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n⚠ 达到最大轮次（${event.turns}），目标未达成` }])
+            break
+          case 'goal_aborted':
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n⚠ 目标工作中断（已完成 ${event.turns} 轮）` }])
+            break
+          case 'goal_error':
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n❌ 目标执行错误: ${event.error}` }])
+            break
+        }
+      }
+    } catch (e) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `❌ 目标失败: ${String(e)}` }])
     } finally {
       setRunning(false)
       abortRef.current = null
@@ -766,6 +832,15 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         }
         return
       }
+      // v1.11: /goal <条件> 目标驱动持续工作（跨轮次直到达成）
+      if (text.startsWith('/goal ')) {
+        const goal = text.slice('/goal '.length).trim()
+        if (goal && !running) {
+          setInput('')
+          void runGoalTask(goal)
+        }
+        return
+      }
       // v1.0 核心差异化：/workflow <需求> 自动走"理解→实现→验证→回顾"四阶段
       if (text.startsWith('/workflow ')) {
         const requirement = text.slice('/workflow '.length).trim()
@@ -805,6 +880,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
 /model [名] — 查看或切换模型
 /plan <需求> — 分析需求并产出实施计划（只读，不改文件）
 /workflow <需求> — ★ 自动走"理解→实现→验证→回顾"四阶段完整工作流
+/goal <条件> — 目标驱动：跨轮次持续工作直到条件达成
+/context — 分析上下文 token 占用 + 优化建议
 /rewind [N] — 回滚文件到 Edit/Write 前的 checkpoint
 /diff — 查看本会话所有改动（diff 格式）
 /init — 生成 AGENTS.md 模板（项目级 agent 行为约定）

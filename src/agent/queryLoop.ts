@@ -28,6 +28,8 @@ import type { ChatMessage, ContentBlock, LlmEvent } from '@/llm/types.js'
 import type { QueryEvent, PermissionUserDecision } from '@/agent/types.js'
 import type { Tool } from '@/tools/Tool.js'
 import { streamMessage, streamMessageWithFallback } from '@/llm/provider.js'
+import { ToolExecutor } from '@/agent/ToolExecutor.js'
+import type { ToolUseRequest } from '@/agent/ToolExecutor.js'
 import { findTool, toolsToAnthropicFormat } from '@/tools/registry.js'
 import { checkPermission } from '@/permissions/decision.js'
 import type { PermissionMode } from '@/permissions/modes.js'
@@ -363,13 +365,13 @@ export async function* queryLoop(
       messages.push(assistantMsg)
       pendingPersist.push(assistantMsg)
 
-      // v1.2: 执行所有工具——并发安全工具并行，非并发工具串行
-      // 策略：先串行做权限检查（含 ask 用户交互），收集 allow 的工具调用；
-      // 然后并发安全的用 Promise.all 并行，非并发安全的依次执行。
-      // 工具执行错误不终止循环（把错误回灌给模型）
+      // v1.2+refactor: 工具执行逻辑封装在 ToolExecutor 类（OOP 分层）
+      // 但权限检查里的 ask 交互仍由 queryLoop 的 yield* askPermission 协调
+      // （因为 async generator 的 yield 不能穿透到 Promise 回调）
+      // 策略：queryLoop 先做权限检查（含 ask），ToolExecutor 只执行已通过的工具
       const toolResultBlocks: ContentBlock[] = []
-      // 先收集权限通过的工具调用（按原始顺序）
-      const permitted: { tu: { id: string; name: string; input: unknown }; tool: Tool; input: unknown }[] = []
+      const permittedForExec: ToolUseRequest[] = []
+
       for (const tu of toolUses) {
         const tool = findTool(tu.name, tools)
         if (!tool) {
@@ -379,7 +381,7 @@ export async function* queryLoop(
           continue
         }
 
-        // v1.3: PreToolUse hook（可改写决策或入参，在权限检查前触发）
+        // PreToolUse hook
         let effectiveInput: unknown = tu.input
         const preHook = await triggerHooks('PreToolUse', { tool: tu.name, toolInput: tu.input }, hooks, opts.cwd)
         if (preHook.updatedInput) effectiveInput = preHook.updatedInput
@@ -413,45 +415,20 @@ export async function* queryLoop(
             continue
           }
         }
-        permitted.push({ tu, tool, input: effectiveInput })
+        permittedForExec.push({ id: tu.id, name: tu.name, input: effectiveInput })
       }
 
-      // 分组：并发安全 vs 串行（保持原顺序）
-      const concurrencySafe: typeof permitted = []
-      const serial: typeof permitted = []
-      for (const p of permitted) {
-        if (p.tool.isConcurrencySafe?.()) concurrencySafe.push(p)
-        else serial.push(p)
-      }
-
-      // 并发安全工具并行执行
-      if (concurrencySafe.length > 0) {
-        const results = await Promise.all(
-          concurrencySafe.map(async ({ tu, tool, input }) => {
-            const result = await tool.execute(input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState, parentHistory: messages })
-            return { tu, tool, result }
-          }),
-        )
-        // 按 tool_use 原始顺序回灌（保证模型看到顺序一致）
-        const orderMap = new Map(toolUses.map((tu, i) => [tu.id, i]))
-        results.sort((a, b) => (orderMap.get(a.tu.id) ?? 0) - (orderMap.get(b.tu.id) ?? 0))
-        for (const { tu, tool, result } of results) {
-          const content = result.ok
-            ? (tool.formatResult ? tool.formatResult(result.data) : JSON.stringify(result.data))
-            : `错误: ${result.error}`
-          toolResultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content, is_error: result.ok ? undefined : true })
-          yield { type: 'tool_result', tool: tu.name, ok: result.ok, content }
-        }
-      }
-
-      // 串行工具依次执行（非并发安全：Write/Edit/Bash/Task 等）
-      for (const { tu, tool, input } of serial) {
-        const result = await tool.execute(input, { cwd: opts.cwd, abortSignal: opts.signal, readFileState, parentHistory: messages })
-        const content = result.ok
-          ? (tool.formatResult ? tool.formatResult(result.data) : JSON.stringify(result.data))
-          : `错误: ${result.error}`
-        toolResultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content, is_error: result.ok ? undefined : true })
-        yield { type: 'tool_result', tool: tu.name, ok: result.ok, content }
+      // 用 ToolExecutor 执行已通过权限检查的工具（并发分组 + 执行 + 结果收集）
+      if (permittedForExec.length > 0) {
+        const executor = new ToolExecutor(tools, findTool)
+        const execBlocks = yield* executor.executePermitted(permittedForExec, {
+          cwd: opts.cwd,
+          abortSignal: opts.signal,
+          readFileState,
+          parentHistory: messages,
+        })
+        toolResultBlocks.push(...execBlocks.blocks)
+        for (const evt of execBlocks.events) yield evt
       }
 
       // tool_result 拼回 messages（结构化 user content），继续下一轮

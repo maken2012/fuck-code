@@ -49,11 +49,19 @@ export class ToolExecutor {
     toolUses: ToolUseRequest[],
     ctx: ExecutionContext,
     messages: unknown[],
+    askHandler?: (toolName: string, input: unknown) => Promise<'allow' | 'deny'>,
   ): AsyncGenerator<QueryEvent, ContentBlock[]> {
     const blocks: ContentBlock[] = []
 
-    // 第一阶段：权限检查（串行，含 askPermission 交互）
-    const permitted = await this.checkPermissions(toolUses, ctx, blocks)
+    // 第一阶段：权限检查。返回 permitted + rejected（需要 yield 的拒绝事件）
+    const { permitted, rejected } = await this.checkPermissions(toolUses, ctx, askHandler)
+
+    // yield 被拒绝的工具结果 + 收集 blocks
+    for (const { block, event } of rejected) {
+      blocks.push(block)
+      yield event
+    }
+
     if (permitted.length === 0) return blocks
 
     // 第二阶段：并发分组
@@ -98,19 +106,87 @@ export class ToolExecutor {
     return blocks
   }
 
-  /** 权限检查 + PreToolUse hook */
+  /**
+   * 执行已通过权限检查的工具（queryLoop 用）。
+   * 只做并发分组 + 执行 + 结果收集，不处理权限。
+   */
+  async *executePermitted(
+    toolUses: ToolUseRequest[],
+    ctx: { cwd: string; abortSignal: AbortSignal; readFileState: ReadFileState; parentHistory: unknown[] },
+  ): AsyncGenerator<QueryEvent, { blocks: ContentBlock[]; events: QueryEvent[] }> {
+    const blocks: ContentBlock[] = []
+    const events: QueryEvent[] = []
+
+    // 查找工具 + 分组
+    const withTools = toolUses
+      .map((tu) => ({ request: tu, tool: this.findTool(tu.name, this.tools) }))
+      .filter((x): x is { request: ToolUseRequest; tool: Tool } => x.tool !== undefined)
+
+    const concurrencySafe = withTools.filter((x) => x.tool.isConcurrencySafe?.())
+    const serial = withTools.filter((x) => !x.tool.isConcurrencySafe?.())
+
+    // 并发安全工具并行执行
+    if (concurrencySafe.length > 0) {
+      const results = await Promise.all(
+        concurrencySafe.map(async ({ request, tool }) => {
+          const result = await tool.execute(request.input, {
+            cwd: ctx.cwd,
+            abortSignal: ctx.abortSignal,
+            readFileState: ctx.readFileState,
+            parentHistory: ctx.parentHistory as never,
+          })
+          return { request, tool, result }
+        }),
+      )
+      const orderMap = new Map(toolUses.map((tu, i) => [tu.id, i]))
+      results.sort((a, b) => (orderMap.get(a.request.id) ?? 0) - (orderMap.get(b.request.id) ?? 0))
+      for (const { request, tool, result } of results) {
+        const { block, event } = this.formatResult(request, tool, result)
+        blocks.push(block)
+        events.push(event)
+        yield event
+      }
+    }
+
+    // 串行工具依次执行
+    for (const { request, tool } of serial) {
+      const result = await tool.execute(request.input, {
+        cwd: ctx.cwd,
+        abortSignal: ctx.abortSignal,
+        readFileState: ctx.readFileState,
+        parentHistory: ctx.parentHistory as never,
+      })
+      const { block, event } = this.formatResult(request, tool, result)
+      blocks.push(block)
+      events.push(event)
+      yield event
+    }
+
+    return { blocks, events }
+  }
+
+  /** 权限检查 + PreToolUse hook。返回 { permitted, rejected } */
   private async checkPermissions(
     toolUses: ToolUseRequest[],
     ctx: ExecutionContext,
-    blocks: ContentBlock[],
-  ): Promise<{ request: ToolUseRequest; tool: Tool; input: unknown }[]> {
+    askHandler?: (toolName: string, input: unknown) => Promise<'allow' | 'deny'>,
+  ): Promise<{
+    permitted: { request: ToolUseRequest; tool: Tool; input: unknown }[]
+    rejected: { block: ContentBlock; event: QueryEvent }[]
+  }> {
     const permitted: { request: ToolUseRequest; tool: Tool; input: unknown }[] = []
+    const rejected: { block: ContentBlock; event: QueryEvent }[] = []
+
+    const addRejected = (tu: ToolUseRequest, content: string) => {
+      const block: ContentBlock = { type: 'tool_result', tool_use_id: tu.id, content, is_error: true }
+      const event: QueryEvent = { type: 'tool_result', tool: tu.name, ok: false, content }
+      rejected.push({ block, event })
+    }
 
     for (const tu of toolUses) {
       const tool = this.findTool(tu.name, this.tools)
       if (!tool) {
-        const content = `错误：未知工具 ${tu.name}`
-        blocks.push({ type: 'tool_result', tool_use_id: tu.id, content, is_error: true })
+        addRejected(tu, `错误：未知工具 ${tu.name}`)
         continue
       }
 
@@ -124,12 +200,7 @@ export class ToolExecutor {
       )
       if (preHook.updatedInput) effectiveInput = preHook.updatedInput
       if (preHook.permissionDecision === 'deny') {
-        blocks.push({
-          type: 'tool_result',
-          tool_use_id: tu.id,
-          content: `hook 拒绝: ${preHook.additionalContext ?? ''}`,
-          is_error: true,
-        })
+        addRejected(tu, `hook 拒绝: ${preHook.additionalContext ?? ''}`)
         continue
       }
 
@@ -147,27 +218,24 @@ export class ToolExecutor {
       })
 
       if (perm.decision === 'deny') {
-        blocks.push({
-          type: 'tool_result',
-          tool_use_id: tu.id,
-          content: `权限拒绝: ${perm.reason ?? '匹配 deny 规则'}`,
-          is_error: true,
-        })
+        addRejected(tu, `权限拒绝: ${perm.reason ?? '匹配 deny 规则'}`)
         continue
       }
 
-      // ask 权限需要外层处理（因为涉及 yield），这里只标记
-      // 实际 askPermission 在 queryLoop 层用 yield* 协调
       if (perm.decision === 'ask') {
-        // 标记需要 ask——由 queryLoop 的 yield* askPermission 处理
-        permitted.push({ request: { ...tu, _needsAsk: true as const }, tool, input: effectiveInput })
-        continue
+        if (askHandler) {
+          const userDecision = await askHandler(tu.name, effectiveInput)
+          if (userDecision === 'deny') {
+            addRejected(tu, `用户拒绝执行 ${tu.name}`)
+            continue
+          }
+        }
       }
 
       permitted.push({ request: tu, tool, input: effectiveInput })
     }
 
-    return permitted
+    return { permitted, rejected }
   }
 
   /** 按 isConcurrencySafe 分组 */

@@ -6,7 +6,7 @@ import type { Tool } from '@/tools/Tool.js'
 import type { ContentBlock } from '@/llm/types.js'
 import type { QueryEvent } from '@/agent/types.js'
 import type { ReadFileState } from '@/tools/_readFileState.js'
-import { checkPermission } from '@/permissions/decision.js'
+import { PermissionManager } from '@/permissions/PermissionManager.js'
 import type { PermissionMode } from '@/permissions/modes.js'
 import { triggerHooks } from '@/hooks/HookManager.js'
 import type { HooksFile } from '@/hooks/HookManager.js'
@@ -204,17 +204,15 @@ export class ToolExecutor {
         continue
       }
 
-      // 权限决策管线
-      const perm = await checkPermission({
-        tool,
-        input: effectiveInput,
-        ctx: {
-          cwd: ctx.cwd,
-          abortSignal: ctx.abortSignal,
-          readFileState: ctx.readFileState,
-        },
+      // 权限决策管线——通过 PermissionManager 类（统一入口）
+      const permManager = PermissionManager.fromConfig({
         permissionMode: ctx.permissionMode,
-        rules: ctx.permissions,
+        permissions: ctx.permissions,
+      })
+      const perm = await permManager.check(tool, effectiveInput, {
+        cwd: ctx.cwd,
+        abortSignal: ctx.abortSignal,
+        readFileState: ctx.readFileState,
       })
 
       if (perm.decision === 'deny') {

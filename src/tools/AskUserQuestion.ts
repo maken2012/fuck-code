@@ -53,15 +53,22 @@ function setQuestion(q: PendingQuestion): void {
 export const AskUserQuestionTool = buildTool<AskQuestionType>({
   name: 'AskUserQuestion',
   description: '向用户问选择题（方案分叉时用）',
-  prompt: `当需要用户在多个方案间决策时，用这个工具结构化提问（比纯文本提问清晰）。
+  prompt: `当需要用户在多个方案间决策时，用结构化提问。
 
 参数：
 - question（必填）：完整的问题描述
 - header（必填）：简短标签（最多 12 字符），如"缓存方案"
-- options（必填）：2-4 个选项，每个含 label（简短显示）+ description（详细说明）
+- options（必填）：2-4 个选项，每个含：
+  - label（必填）：简短显示文本
+  - description（可选）：详细说明
+  - recommended（可选）：标记推荐选项（UI 显示 "(推荐)"）
+  - preview（可选）：预览内容（代码片段/方案对比）
 - multiSelect（可选）：允许多选，默认 false
 
-何时用：
+何时用（深度比对第 82 轮增强）：
+- 技术方案分叉需要用户拍板
+- 需求有歧义需要澄清
+- plan 模式确认实施方向
 - 技术方案有多个合理选择，需要用户拍板
 - 需求有歧义，需要用户澄清
 - plan 模式里确认实施方向

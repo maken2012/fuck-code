@@ -94,13 +94,20 @@ export async function* streamOpenAICompatible(opts: StreamOpenAIOpts): AsyncGene
         choices?: Array<{
           delta?: {
             content?: string | null
+            reasoning_content?: string | null
+            reasoning?: string | null
             tool_calls?: Array<{ index: number; id?: string; function?: { name?: string; arguments?: string } }>
           }
           finish_reason?: string | null
         }>
-        usage?: { prompt_tokens?: number; completion_tokens?: number }
+        usage?: { prompt_tokens?: number; completion_tokens?: number; reasoning_tokens?: number }
       }
       const choice = c.choices?.[0]
+      // 深度比对第 18 轮: reasoning/thinking 支持（MiniMax-M3/o1/DeepSeek-R1 等）
+      const reasoningText = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning
+      if (reasoningText) {
+        yield { type: 'thinking', textDelta: reasoningText }
+      }
       if (choice?.delta?.content) {
         yield { type: 'text', textDelta: choice.delta.content }
       }
@@ -117,7 +124,6 @@ export async function* streamOpenAICompatible(opts: StreamOpenAIOpts): AsyncGene
       if (choice?.finish_reason) {
         stopReason = choice.finish_reason
       }
-      // usage 在最后一个 chunk（stream_options.include_usage）
       if (c.usage) {
         inputTokens = c.usage.prompt_tokens ?? 0
         outputTokens = c.usage.completion_tokens ?? 0
@@ -125,7 +131,17 @@ export async function* streamOpenAICompatible(opts: StreamOpenAIOpts): AsyncGene
     }
   } catch (e) {
     if (opts.signal.aborted) throw new DOMException('Aborted', 'AbortError')
-    yield { type: 'error', error: e as Error }
+    // 深度比对第 18 轮: 友好错误提示（对标 anthropic.ts）
+    const err = e as { status?: number; message?: string }
+    let friendly = err.message ?? String(e)
+    if (err.status === 401) {
+      friendly = `OpenAI 兼容 API key 无效。检查 config.json 的 apiKey 和 apiBaseUrl。`
+    } else if (err.status === 429) {
+      friendly = `OpenAI 兼容 API 限流（429）。请稍后再试。`
+    } else if (err.status && err.status >= 500) {
+      friendly = `OpenAI 兼容 API 服务端错误（${err.status}）。服务可能暂时不可用。`
+    }
+    yield { type: 'error', error: new Error(friendly) }
     return
   }
 

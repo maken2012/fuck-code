@@ -3,6 +3,7 @@
 // 默认最多 2000 行。只读 + 可并发（不改文件系统）。
 import { readFile, stat } from 'node:fs/promises'
 import { buildTool } from '@/tools/Tool.js'
+import { pruneReadFileState } from '@/tools/_readFileState.js'
 import { z } from 'zod'
 
 const ReadInput = z.object({
@@ -104,6 +105,8 @@ export const ReadTool = buildTool<ReadInputType>({
         mtime: stats.mtimeMs,
         readAt: Date.now(),
       })
+      // 深度比对第 29 轮: LRU 裁剪（防长会话内存无限增长）
+      pruneReadFileState(ctx.readFileState)
 
       return { ok: true, data: numbered + summary }
     } catch (e) {

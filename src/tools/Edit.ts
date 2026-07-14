@@ -67,12 +67,21 @@ export const EditTool = buildTool<EditInputType>({
 
     try {
       // 护栏 2：文件未被外部修改（mtime 必须与记录一致）
+      // 深度比对第 41 轮: mtime 容差——mtime 变了但内容没变时仍放行（对标 Claude Code）
+      // 场景：云同步（iCloud/Dropbox）、杀软扫描、git checkout 触发 mtime 变化但内容不变
       const curStat = await stat(file_path)
       if (curStat.mtimeMs !== state.mtime) {
-        return {
-          ok: false,
-          error: `文件自上次 Read 后被外部修改（mtime 变化），请重新 Read 后再 Edit: ${file_path}`,
-          isError: true,
+        // mtime 变了——读文件内容对比是否真的变了
+        const currentContent = await readFile(file_path, 'utf8')
+        if (state.lastContent && currentContent === state.lastContent) {
+          // 内容未变——mtime 变化是外部因素（云同步/杀软），放行
+          // 静默更新 mtime，继续编辑
+        } else {
+          return {
+            ok: false,
+            error: `文件自上次 Read 后被外部修改（mtime 变化且内容不同），请重新 Read 后再 Edit: ${file_path}`,
+            isError: true,
+          }
         }
       }
 

@@ -112,11 +112,13 @@ export const ReadTool = buildTool<ReadInputType>({
 
       const summary = `\n（共 ${totalLines} 行，显示 ${shownRange}）`
 
-      // M4：记录已读状态（mtime + readAt + range），供 Edit/Write 写前校验 + 重复读取去重
+      // M4：记录已读状态（mtime + readAt + range + lastContent），供 Edit/Write 写前校验 + 重复读取去重 + mtime 容差
       ctx.readFileState.set(input.file_path, {
         mtime: stats.mtimeMs,
         readAt: Date.now(),
         readRange: reqKey,
+        // 深度比对第 41 轮: 只缓存小文件内容（<50KB）用于 mtime 容差比对
+        lastContent: content.length < 51200 ? content : undefined,
       })
       // 深度比对第 29 轮: LRU 裁剪（防长会话内存无限增长）
       pruneReadFileState(ctx.readFileState)

@@ -95,6 +95,8 @@ interface PendingPermission {
 }
 
 export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialApiBaseUrl }: ReplProps) {
+  // 深度比对修复 #5: 权限"总是允许"——记住决策不重复问
+  const alwaysAllowRef = useRef<Set<string>>(new Set())
   // M6+: 当前模型（支持 /model 运行时切换）。初值来自 CLI flag > config
   const [currentModel, setCurrentModel] = useState(initialModel ?? 'claude-sonnet-4-5-20250929')
   const { exit } = useApp()
@@ -273,6 +275,11 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             break
           }
           case 'permission_request': {
+            // 深度比对修复 #5: always-allow 检查（已记住的工具直接放行）
+            if (alwaysAllowRef.current.has(event.tool)) {
+              event.resolve('allow')
+              break
+            }
             // 设置 pendingPermission 状态：弹窗渲染 + useInput 接管输入等 y/n
             // 同时写 ref（useInput 闭包读 ref，避免 stale state）
             const pending: PendingPermission = {
@@ -1046,6 +1053,14 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         setPendingPermission(null)
         return
       }
+      // 深度比对修复 #5: "a" = 总是允许（记住，同工具不再问）
+      if (inputChar === 'a' || inputChar === 'A') {
+        alwaysAllowRef.current.add(pending.tool)
+        pending.resolve('allow')
+        pendingPermissionRef.current = null
+        setPendingPermission(null)
+        return
+      }
       if (inputChar === 'n' || inputChar === 'N') {
         pending.resolve('deny')
         pendingPermissionRef.current = null
@@ -1199,8 +1214,15 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       // 允许可见字符 + 空格（空格之前被 \S 过滤掉了，导致 /plan 后没法输入需求）
       // 仍排除纯控制字符（如孤立的 Esc）
       const isValidChar = inputChar.trim().length > 0 && !/^\x1b+$/.test(inputChar)
+      // 深度比对修复 #10: 大段粘贴截断（超 10000 字符截断防卡死）
+      const MAX_INPUT = 10000
       if (isValidChar || inputChar === ' ') {
-        setInput((s) => s + inputChar)
+        setInput((s) => {
+          if (s.length + inputChar.length > MAX_INPUT) {
+            return s + inputChar.slice(0, MAX_INPUT - s.length) + '\n[输入过长，已截断]'
+          }
+          return s + inputChar
+        })
       }
     }
   })
@@ -1221,8 +1243,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       {pendingPermission && (
         <Box marginTop={1} flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
           <Text color="yellow" bold>[WARN] {pendingPermission.tool}</Text>
-          <Text>{pendingPermission.summary.slice(0, 80)}</Text>
-          <Text dimColor>[y] 允许 · [n] 拒绝 · [Ctrl+C] 拒绝</Text>
+          <Text>{pendingPermission.summary}</Text>
+          <Text dimColor>[y] 本次允许 · [a] 总是允许 · [n] 拒绝 · [Ctrl+C] 拒绝</Text>
         </Box>
       )}
 

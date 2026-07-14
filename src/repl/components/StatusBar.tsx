@@ -22,7 +22,7 @@ export function StatusBar({ running, pendingPermission, model, totalTokens, idle
           ? attitudeFor('permission')
           : running
             ? `${genAttitude} [Ctrl+C 中断]`
-            : `${model} · ${totalTokens.input + totalTokens.output} tok · ${idleAttitude}`}
+            : `${model} · ${totalTokens.input + totalTokens.output} tok · Alt+Enter 换行 · ${idleAttitude}`}
       </Text>
     </Box>
   )

@@ -1279,6 +1279,17 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       setCmdHintIndex(0)
       return
     }
+    // 深度比对修复 #2: 多行输入——Alt+Enter / Shift+Enter 插入换行
+    if (key.return && (key.meta || key.shift)) {
+      setInput((s) => {
+        const before = s.slice(0, cursorOffset)
+        const after = s.slice(cursorOffset)
+        const newInput = before + '\n' + after
+        setCursorOffset(before.length + 1)
+        return newInput
+      })
+      return
+    }
     // 回车提交——用 CommandRegistry 分发（替代 17 个 if-else）
     if (key.return) {
       const text = input.trim()

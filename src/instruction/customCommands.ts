@@ -12,6 +12,7 @@ export interface CustomCommand {
   model?: string                // frontmatter model（覆盖当前模型）
   template: string              // 正文（含 $ARGUMENTS / $1 占位符）
   filePath: string
+  hints?: string                // 深度比对第 43 轮: 自动提取的参数提示（如 '<文件名>'）
 }
 
 // 解析 frontmatter + 正文
@@ -28,7 +29,38 @@ function parseCommandFile(content: string, name: string, filePath: string): Cust
     description = descMatch?.[1]?.trim()
     model = modelMatch?.[1]?.trim()
   }
-  return { name, description, model, template, filePath }
+  // 深度比对第 43 轮: 自动提取参数提示（对标 opencode hints()）
+  const hints = extractHints(template)
+  return { name, description, model, template, filePath, hints }
+}
+
+// 深度比对第 43 轮: 从模板正文提取 $N/$ARGUMENTS 并生成参数提示
+// 如模板含 $1 $2 → hints = '<参数1> <参数2>'
+// 如模板含 $ARGUMENTS → hints = '<参数>'
+export function extractHints(template: string): string | undefined {
+  const positionalParams = new Set<number>()
+  let hasArguments = false
+
+  // 扫描 $1 $2 $ARGUMENTS（排除 shell 执行的 !`...` 里的）
+  const cleaned = template.replace(/!`[^`]+`/g, '') // 先去掉 shell 执行段
+  const matches = cleaned.matchAll(/\$(\d+|\{(\d+)\}|ARGUMENTS)/g)
+  for (const m of matches) {
+    const token = m[1] ?? ''
+    if (token === 'ARGUMENTS') {
+      hasArguments = true
+    } else {
+      positionalParams.add(parseInt(token) || 0)
+    }
+  }
+
+  if (hasArguments && positionalParams.size === 0) {
+    return '<参数>'
+  }
+  if (positionalParams.size > 0) {
+    const sorted = [...positionalParams].sort((a, b) => a - b)
+    return sorted.map((n) => `<参数${n}>`).join(' ')
+  }
+  return undefined
 }
 
 // 从 cwd/.fuckcode/commands/ 加载所有自定义命令

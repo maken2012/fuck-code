@@ -423,6 +423,15 @@ export async function* queryLoop(
         })
         toolResultBlocks.push(...execBlocks.blocks)
         for (const evt of execBlocks.events) yield evt
+        // 深度比对第 20 轮: PostToolUse hook 触发（工具执行后）
+        for (const p of permittedForExec) {
+          const postResult = execBlocks.blocks.find((b): b is ContentBlock & { type: 'tool_result' } => b.type === 'tool_result' && b.tool_use_id === p.id)
+          await triggerHooks('PostToolUse', {
+            tool: p.name,
+            toolInput: p.input,
+            result: postResult?.content ?? '',
+          }, hooks, opts.cwd).catch(() => ({} as never))
+        }
       }
 
       // tool_result 拼回 messages（结构化 user content），继续下一轮

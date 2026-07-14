@@ -18,19 +18,26 @@ type WebSearchInputType = z.infer<typeof WebSearchInput>
 export const WebSearchTool = buildTool<WebSearchInputType>({
   name: 'WebSearch',
   description: '搜索网络（查文档、查最新 API、查 issue）',
-  prompt: `搜索网络获取信息。用于：
-- 查库/框架的官方文档
-- 查最新的 API 变化（避免用过时信息）
-- 查报错信息的解决方案
-- 查 GitHub issue / Stack Overflow
+  prompt: `搜索网络获取信息（DuckDuckGo Lite）。
 
 参数：
 - query（必填）：搜索关键词，用英文效果更好
 - max_results（可选）：最大结果数，默认 5
 
-返回搜索结果的标题 + URL + 摘要。找到有用内容后可以用 WebFetch 抓取完整页面。
+特性（深度比对第 81 轮增强）：
+- 结果去重（URL 级别去重）
+- 附 Sources 段（URL 列表，方便引用来源）
+- 15s 超时
 
-注意：本地代码相关的问题（文件内容、项目结构）不要用 WebSearch，用 Grep/Glob/Read。`,
+返回搜索结果的标题 + URL + 摘要 + Sources。
+找到有用内容后用 WebFetch 抓取完整页面。
+
+用途：
+- 查库/框架文档、最新 API 变化
+- 查报错解决方案
+- 查 GitHub issue / Stack Overflow
+
+注意：本地代码问题用 Grep/Glob/Read，不要用 WebSearch。`,
   inputSchema: WebSearchInput,
   jsonSchema: {
     type: 'object',

@@ -8,6 +8,7 @@
 //
 // isReadOnly: false（改文件系统），isConcurrencySafe: false（不可并发）。
 import { writeFile, rename, stat } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { buildTool } from '@/tools/Tool.js'
 import { z } from 'zod'
 
@@ -99,9 +100,37 @@ export const WriteTool = buildTool<WriteInputType>({
       })
 
       const action = fileExists ? '已写入' : '已创建'
+      // 深度比对第 48 轮: Write 后自动类型检查（对标 Claude Code didSave → LSP diagnostics）
+      let typeCheckHint = ''
+      if (/\.(ts|tsx|mts|cts)$/.test(file_path)) {
+        try {
+          const { spawn } = await import('node:child_process')
+          const { existsSync } = await import('node:fs')
+          const tscPath = resolve(ctx.cwd, 'node_modules', '.bin', 'tsc')
+          if (existsSync(tscPath)) {
+            const result = await new Promise<{ ok: boolean; output: string }>((r) => {
+              const proc = spawn(tscPath, ['--noEmit', '--pretty', 'false'], {
+                cwd: ctx.cwd, shell: true, timeout: 15000,
+              })
+              let out = ''
+              proc.stdout?.on('data', (d: Buffer) => { out += d.toString() })
+              proc.stderr?.on('data', (d: Buffer) => { out += d.toString() })
+              proc.on('close', (code) => r({ ok: code === 0, output: out }))
+              proc.on('error', () => r({ ok: true, output: '' }))
+            })
+            if (!result.ok && result.output) {
+              const shortPath = file_path.replace(ctx.cwd + '/', '')
+              const fileErrors = result.output.split('\n').filter((l) => l.includes(shortPath))
+              if (fileErrors.length > 0) {
+                typeCheckHint = `\n\n[!] 创建/写入后有 ${fileErrors.length} 个类型错误:\n${fileErrors.slice(0, 5).join('\n')}`
+              }
+            }
+          }
+        } catch { /* 类型检查失败不阻塞 */ }
+      }
       return {
         ok: true,
-        data: `${action} ${file_path}（${content.length} 字节）`,
+        data: `${action} ${file_path}（${content.length} 字节）${typeCheckHint}`,
       }
     } catch (e) {
       return { ok: false, error: `写入失败: ${(e as Error).message}`, isError: true }

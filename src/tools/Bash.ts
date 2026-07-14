@@ -184,7 +184,13 @@ export const BashTool = buildTool<BashInputType>({
         isError: true,
       }
     }
-    return { ok: true, data: outcomeToData(outcome) }
+    // 深度比对第 64 轮: cwd 重置检测（对标 Claude Code '命令把 cwd 改到项目外时提示'）
+    const data = outcomeToData(outcome)
+    const cwdAfter = findCwdChange(data.stdout)
+    if (cwdAfter && cwdAfter !== ctx.cwd && !cwdAfter.startsWith(ctx.cwd)) {
+      data.stdout = (data.stdout || '') + `\n[!] 命令可能 cd 到了 ${cwdAfter}，后续命令仍在 ${ctx.cwd} 下执行`
+    }
+    return { ok: true, data }
   },
 
   // 深度比对修复 #8：截断时给模型明确标记（而非默默砍尾巴）
@@ -368,3 +374,11 @@ function checkDangerousCommand(cmd: string): string | null {
 }
 
 
+
+// 深度比对第 64 轮: 从 stdout 里检测 cd 命令的目标目录（对标 Claude Code cwd 重置检测）
+function findCwdChange(stdout: string): string | null {
+  // 检测 `cd /some/path` 模式的输出或 PWD 变化
+  const cdMatch = stdout.match(/^(?:PWD|pwd)[:=]\s*(.+)$/m)
+  if (cdMatch?.[1]) return cdMatch[1].trim()
+  return null
+}

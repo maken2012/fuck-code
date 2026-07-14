@@ -10,6 +10,7 @@ export interface CustomCommand {
   name: string                  // 命令名（不含 /，来自文件名）
   description?: string          // frontmatter description
   model?: string                // frontmatter model（覆盖当前模型）
+  effort?: string               // 深度比对第 64 轮: frontmatter effort（覆盖模型推理深度，对标 opencode/Claude Code skill effort）
   template: string              // 正文（含 $ARGUMENTS / $1 占位符）
   filePath: string
   hints?: string                // 深度比对第 43 轮: 自动提取的参数提示（如 '<文件名>'）
@@ -20,18 +21,21 @@ function parseCommandFile(content: string, name: string, filePath: string): Cust
   const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
   let description: string | undefined
   let model: string | undefined
+  let effort: string | undefined
   let template = content
   if (frontmatterMatch) {
     const fm = frontmatterMatch[1] ?? ''
     template = (frontmatterMatch[2] ?? '').trim()
     const descMatch = fm.match(/^description:\s*(.+)$/m)
     const modelMatch = fm.match(/^model:\s*(.+)$/m)
+    const effortMatch = fm.match(/^effort:\s*(.+)$/m)
     description = descMatch?.[1]?.trim()
     model = modelMatch?.[1]?.trim()
+    effort = effortMatch?.[1]?.trim()
   }
   // 深度比对第 43 轮: 自动提取参数提示（对标 opencode hints()）
   const hints = extractHints(template)
-  return { name, description, model, template, filePath, hints }
+  return { name, description, model, effort, template, filePath, hints }
 }
 
 // 深度比对第 43 轮: 从模板正文提取 $N/$ARGUMENTS 并生成参数提示

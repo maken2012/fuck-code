@@ -1094,6 +1094,51 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       { cmd: '/plan', desc: '只读分析计划', args: '<需求>', example: '/plan 重构' },
       (args) => { if (args) void runPlan(args) },
     )
+    // 深度比对第 10 轮: /config 运行时查看/修改配置
+    reg.register(
+      { cmd: '/config', desc: '查看或修改配置', args: '[key=value]', example: '/config model=gpt-4o' },
+      (args) => {
+        const cfg = configRef.current
+        if (!args) {
+          // 显示当前配置
+          const lines = [
+            `model = ${currentModel}`,
+            `maxTokens = ${cfg?.maxTokens ?? 8192}`,
+            `contextWindow = ${cfg?.contextWindow ?? 200000}`,
+            `permissionMode = ${cfg?.permissionMode ?? 'default'}`,
+            `provider = ${cfg?.provider ?? 'auto'}`,
+            `apiBaseUrl = ${cfg?.apiBaseUrl ?? '(default)'}`,
+            `fallbackModels = ${cfg?.fallbackModels?.join(', ') ?? '(none)'}`,
+          ]
+          setHistory((h) => [...h, {
+            role: 'assistant' as const,
+            text: `当前配置:\n${lines.map((l) => `  ${l}`).join('\n')}\n\n修改：/config key=value（如 /config model=gpt-4o）`,
+          }])
+        } else {
+          // 解析 key=value
+          const eqIdx = args.indexOf('=')
+          if (eqIdx === -1) {
+            setHistory((h) => [...h, { role: 'assistant' as const, text: '用法：/config key=value（如 /config model=gpt-4o）' }])
+          } else {
+            const key = args.slice(0, eqIdx).trim()
+            const value = args.slice(eqIdx + 1).trim()
+            // 运行时修改 configRef
+            if (configRef.current) {
+              if (key === 'model') { configRef.current.model = value; setCurrentModel(value) }
+              else if (key === 'maxTokens') configRef.current.maxTokens = parseInt(value) || 8192
+              else if (key === 'permissionMode') configRef.current.permissionMode = value as typeof configRef.current.permissionMode
+              else if (key === 'provider') configRef.current.provider = value as typeof configRef.current.provider
+              else {
+                setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 未知配置项: ${key}\n可改: model / maxTokens / permissionMode / provider` }])
+                return
+              }
+              setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] ${key} = ${value}（下次对话生效）` }])
+            }
+          }
+        }
+        setInput('')
+      },
+    )
 
     commandRegistryRef.current = reg
   }

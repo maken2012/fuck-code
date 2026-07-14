@@ -71,10 +71,17 @@ function convertMcpTool(serverName: string, mcpTool: McpTool, client: Client): T
 
     async execute(input) {
       try {
-        const result = await client.callTool({
-          name: mcpTool.name,
-          arguments: input as Record<string, unknown>,
-        })
+        // 深度比对第 22 轮: 工具调用超时（30s，防 MCP server 卡住 agent 死等）
+        const CALL_TIMEOUT = 30000
+        const result = await Promise.race([
+          client.callTool({
+            name: mcpTool.name,
+            arguments: input as Record<string, unknown>,
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`MCP 工具 ${mcpTool.name} 超时（${CALL_TIMEOUT / 1000}s）`)), CALL_TIMEOUT)
+          ),
+        ])
         // MCP 返回 content 数组
         const content = (result.content as Array<{ type: string; text?: string }>)
           ?.map((c) => c.text ?? '')
@@ -114,14 +121,31 @@ export async function connectMcpServer(
   }
 
   const client = new Client(
-    { name: 'fuckcode', version: '1.9.0' },
-    { capabilities: {} },
+    { name: 'fuckcode', version: '1.22.0' },
+    // 深度比对第 22 轮: 暴露 roots capability（让 MCP server 知道当前工作目录）
+    { capabilities: { roots: { listChanged: true } } },
   )
 
-  await client.connect(transport)
+  // 深度比对第 22 轮: 连接超时（10s，防 server hang 阻塞启动）
+  const CONNECT_TIMEOUT = 10000
+  await Promise.race([
+    client.connect(transport),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`MCP server "${name}" 连接超时（${CONNECT_TIMEOUT / 1000}s）`)), CONNECT_TIMEOUT)
+    ),
+  ])
 
-  // list tools
-  const toolsResult = await client.listTools()
+  // 暴露 cwd 作为 root（让文件系统类 MCP server 知道工作目录）
+  // 注：setRoots 可能在部分 SDK 版本不可用，用可选链容错
+  ;(client as unknown as { setRoots?: (roots: unknown[]) => Promise<unknown> })?.setRoots?.([{ uri: `file://${process.cwd()}`, name: 'cwd' }]).catch(() => {})
+
+  // list tools（深度比对第 22 轮: listTools 也加超时）
+  const toolsResult = await Promise.race([
+    client.listTools(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`MCP server "${name}" listTools 超时`)), 10000)
+    ),
+  ])
   const mcpTools = toolsResult.tools ?? []
   const tools = mcpTools.map((t) => convertMcpTool(name, t, client))
 

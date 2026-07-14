@@ -1374,7 +1374,20 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       return
     }
     // v1.2: ↑↓ 浏览输入历史
+    // 深度比对第 49 轮: 多行模式 ↑↓ 先在行内移动，到边界才触发历史（对标 Claude Code useTextInput）
     if (key.upArrow) {
+      if (input.includes('\n')) {
+        const beforeCursor = input.slice(0, cursorOffset)
+        const lineStart = beforeCursor.lastIndexOf('\n') + 1
+        const currentCol = cursorOffset - lineStart
+        if (lineStart > 0) {
+          const prevLineEnd = lineStart - 1
+          const prevLineStart = beforeCursor.slice(0, prevLineEnd).lastIndexOf('\n') + 1
+          const prevLineLen = prevLineEnd - prevLineStart
+          setCursorOffset(prevLineStart + Math.min(currentCol, prevLineLen))
+          return
+        }
+      }
       const history = inputHistoryRef.current
       if (history.length > 0) {
         if (historyIndexRef.current === -1) {
@@ -1382,21 +1395,38 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         } else {
           historyIndexRef.current = Math.max(0, historyIndexRef.current - 1)
         }
-        setInput(history[historyIndexRef.current] ?? '')
+        const val = history[historyIndexRef.current] ?? ''
+        setInput(val)
+        setCursorOffset(val.length)
       }
       return
     }
     if (key.downArrow) {
+      if (input.includes('\n')) {
+        const afterCursor = input.slice(cursorOffset)
+        const nextNewline = afterCursor.indexOf('\n')
+        if (nextNewline !== -1) {
+          const beforeCursor = input.slice(0, cursorOffset)
+          const lineStart = beforeCursor.lastIndexOf('\n') + 1
+          const currentCol = cursorOffset - lineStart
+          const nextLineStart = cursorOffset + nextNewline + 1
+          const nextLineEnd = input.indexOf('\n', nextLineStart)
+          const nextLineLen = nextLineEnd === -1 ? input.length - nextLineStart : nextLineEnd - nextLineStart
+          setCursorOffset(nextLineStart + Math.min(currentCol, nextLineLen))
+          return
+        }
+      }
       const history = inputHistoryRef.current
       if (historyIndexRef.current >= 0) {
         historyIndexRef.current++
         if (historyIndexRef.current >= history.length) {
-          historyIndexRef.current = -1 // 回到当前输入
+          historyIndexRef.current = -1
           setInput('')
         setCursorOffset(0)
-        setCursorOffset(0)
         } else {
-          setInput(history[historyIndexRef.current] ?? '')
+          const val = history[historyIndexRef.current] ?? ''
+          setInput(val)
+          setCursorOffset(val.length)
         }
       }
       return

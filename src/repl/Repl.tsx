@@ -19,13 +19,14 @@ import type { WorkflowStage } from '@/agent/workflow.js'
 import { runGoal } from '@/agent/goalRunner.js'
 import { attitudeFor, BANNER, TAGLINE, toolTag, STATUS, divider } from '@/personality.js'
 import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
+import { loadSkills } from '@/instruction/skills.js'
 import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
 import { listCheckpoints, restoreCheckpoint } from '@/tools/checkpoint.js'
 import type { Checkpoint } from '@/tools/checkpoint.js'
 import { loadPromptHistory, appendPromptHistory } from '@/services/PromptHistory.js'
 import { diffText, formatDiff } from '@/utils/diff.js'
 import { estimateTokens } from '@/utils/tokens.js'
-import { readFile } from 'node:fs/promises'
+import { readFile, mkdir } from 'node:fs/promises'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { getAllTools } from '@/tools/registry.js'
@@ -50,6 +51,7 @@ const ALL_COMMANDS: { cmd: string; desc: string; args?: string; example?: string
   { cmd: '/cost', desc: '显示本次会话累计 token 用量', args: '', example: '/cost' },
   { cmd: '/model', desc: '查看当前模型 / 切换到别的模型', args: '[模型名]', example: '/model 或 /model gpt-4o' },
   { cmd: '/less-perms', desc: '分析常用操作，生成权限白名单减少弹窗', args: '', example: '/less-perms' },
+  { cmd: '/skills', desc: '查看/创建 skill（领域知识包），如 /skills create vue-debug', args: '[create <名>]', example: '/skills 或 /skills create react-perf' },
   { cmd: '/init', desc: '生成 AGENTS.md 模板（项目级行为约定）', args: '', example: '/init' },
   { cmd: '/agents', desc: '显示当前加载的 AGENTS.md 指令内容', args: '', example: '/agents' },
   { cmd: '/sessions', desc: '列出本项目的历史会话', args: '', example: '/sessions' },
@@ -557,6 +559,73 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     setHistory((h) => [...h, { role: 'assistant' as const, text: ok ? `[ OK ] 已恢复 ${target.originalPath}` : `[FAIL] 恢复失败` }])
   }
 
+  // v1.12: /skills 查看已有 skill + 创建引导
+  async function handleSkillsCommand(text: string): Promise<void> {
+    const skills = await loadSkills(process.cwd())
+    if (text === '/skills') {
+      if (skills.length === 0) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `还没有 skill。
+
+怎么创建 skill：
+  1. 建 .fuckcode/skills/<名字>/SKILL.md
+  2. 写 frontmatter + 内容，格式如下：
+
+  ---
+  name: vue-debug
+  description: Vue3 组件调试技巧
+  effort: high
+  ---
+
+  # Vue 调试
+  这里写详细的知识/指令/流程...
+
+  3. 重启或对话，模型会自动发现并在需要时用 Skill 工具加载
+
+skill 目录兼容：
+  .fuckcode/skills/  ← fuckcode 原生
+  .claude/skills/    ← 兼容 Claude Code
+  .agents/skills/    ← 兼容 Codex` }])
+        return
+      }
+      const list = skills.map((s) => {
+        const tag = s.effort ? ` [${s.effort}]` : ''
+        return `  ${s.name}${tag}\n    ${s.description}`
+      }).join('\n')
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `已加载 ${skills.length} 个 skill：
+
+${list}
+
+模型在对话中会自动判断是否需要某个 skill，用 Skill 工具加载详细内容。` }])
+      return
+    }
+    // /skills create <名字>
+    if (text.startsWith('/skills create ')) {
+      const name = text.slice('/skills create '.length).trim()
+      if (!name) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: '用法：/skills create <skill名字>' }])
+        return
+      }
+      const targetDir = resolve(process.cwd(), '.fuckcode', 'skills', name)
+      await mkdir(targetDir, { recursive: true })
+      const targetFile = resolve(targetDir, 'SKILL.md')
+      const template = `---
+name: ${name}
+description: 一句话描述这个 skill 干什么
+effort: medium
+---
+
+# ${name}
+
+在这里写详细的知识/指令/流程。
+
+模型会在判断需要时自动用 Skill 工具加载这个文件的内容。
+所以这里写的东西要具体、可操作——像给一个新手的操作手册。`
+      await writeFile(targetFile, template, 'utf8')
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 已创建 ${targetFile}
+编辑它写入 skill 内容，下次对话自动加载。` }])
+    }
+  }
+
   // v1.12: /less-permission-prompts 分析历史并生成 allowlist 建议
   async function handleLessPermissionsCommand(): Promise<void> {
     // 从 inputHistoryRef 读历史 prompt（找含 Bash 命令意图的）
@@ -926,6 +995,14 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         if (!running) {
           setInput('')
           void handleContextCommand()
+        }
+        return
+      }
+      // v1.12: /skills 查看/创建 skill
+      if (text === '/skills' || text.startsWith('/skills ')) {
+        if (!running) {
+          setInput('')
+          void handleSkillsCommand(text)
         }
         return
       }

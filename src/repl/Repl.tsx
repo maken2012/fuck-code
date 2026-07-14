@@ -8,7 +8,7 @@
 // M5：启动期创建 session，每次 runQuery 把 sessionId + contextWindow 传给 queryLoop，
 //   queryLoop 负责 loadMessages/appendMessages/autoCompact。
 //   /sessions 列出历史会话；/resume [N] 恢复历史会话（替换 chatHistoryRef + sessionId）。
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Box, Text, useInput, useApp } from 'ink'
 import type { ChatMessage } from '@/llm/types.js'
 import { queryLoop } from '@/agent/queryLoop.js'
@@ -19,6 +19,8 @@ import type { WorkflowStage } from '@/agent/workflow.js'
 import { runGoal } from '@/agent/goalRunner.js'
 import { attitudeFor, BANNER, TAGLINE, toolTag, STATUS, divider } from '@/personality.js'
 import { CommandRegistry } from '@/repl/CommandRegistry.js'
+import { MessageHistory } from '@/repl/MessageHistory.js'
+import type { DisplayMessage } from '@/repl/MessageHistory.js'
 import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
 import { loadSkills } from '@/instruction/skills.js'
 import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
@@ -79,10 +81,6 @@ export interface ReplProps {
   initialApiBaseUrl?: string
 }
 
-interface DisplayMessage {
-  role: 'user' | 'assistant'
-  text: string
-}
 
 // M4：权限弹窗的待处理状态。resolve 是 queryLoop 注入的回调，
 // 用户回复后调一次 resolve 让 queryLoop 的 await 解除阻塞。
@@ -100,7 +98,17 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   // v1.2: 输入历史（↑↓ 浏览）
   const inputHistoryRef = useRef<string[]>([])
   const historyIndexRef = useRef<number>(-1) // -1 表示当前输入，>=0 表示浏览历史第 N 项
-  const [history, setHistory] = useState<DisplayMessage[]>([])
+  // refactor: MessageHistory 类管理对话历史（替代裸 useState + chatHistoryRef）
+  const historyMgrRef = useRef(new MessageHistory()).current
+  const [history, setHistoryRaw] = useState<DisplayMessage[]>([])
+  // 委托 setHistory 给 MessageHistory（同步存储 + 触发 React 重渲染）
+  const setHistory = useCallback((updater: DisplayMessage[] | ((prev: DisplayMessage[]) => DisplayMessage[])) => {
+    setHistoryRaw((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater
+      historyMgrRef.setDisplay(next)
+      return next
+    })
+  }, [historyMgrRef])
   const [running, setRunning] = useState(false)
   // UX: 实时命令提示（输入 / 后下方显示匹配命令，↑↓ 选中，Tab 确认）
   const [cmdHintIndex, setCmdHintIndex] = useState(0)
@@ -278,20 +286,14 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             // 注意：sessionId 存在时，磁盘历史由 queryLoop 维护，
             // chatHistoryRef 仅作显示用（M5 也可在 resume 后留空）。
             if (event.stopReason !== 'tool_use') {
-              chatHistoryRef.current = [
-                ...chatHistoryRef.current,
-                { role: 'user', content: text },
-                { role: 'assistant', content: assistantText },
-              ]
+              historyMgrRef.recordTurn(text, assistantText)
+              chatHistoryRef.current = historyMgrRef.getChat()
             }
             break
           case 'aborted':
             if (assistantText) {
-              chatHistoryRef.current = [
-                ...chatHistoryRef.current,
-                { role: 'user', content: text },
-                { role: 'assistant', content: assistantText + ' [已中断]' },
-              ]
+              historyMgrRef.recordTurn(text, assistantText + ' [已中断]')
+              chatHistoryRef.current = historyMgrRef.getChat()
             }
             break
           case 'error':
@@ -862,7 +864,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       const msgs = await loadMessages(target.id, process.cwd()).catch(
         () => [] as ChatMessage[],
       )
-      chatHistoryRef.current = msgs
+      historyMgrRef.restore(msgs)
+      chatHistoryRef.current = historyMgrRef.getChat()
       setSessionId(target.id)
       setHistory((h) => [
         ...h,
@@ -890,6 +893,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
     reg.register(
       { cmd: '/clear', desc: '清空当前上下文', example: '/clear' },
       () => {
+        historyMgrRef.clearChat()
         chatHistoryRef.current = []
         setHistory([])
         setInput('')

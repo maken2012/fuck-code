@@ -17,7 +17,7 @@ import { PLAN_MODE_INSTRUCTION } from '@/agent/planPrompt.js'
 import { runWorkflow } from '@/agent/workflow.js'
 import type { WorkflowStage } from '@/agent/workflow.js'
 import { runGoal } from '@/agent/goalRunner.js'
-import { attitudeFor, LOGO, toolEmoji } from '@/personality.js'
+import { attitudeFor, BANNER, TAGLINE, toolTag, STATUS, divider } from '@/personality.js'
 import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
 import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
 import { listCheckpoints, restoreCheckpoint } from '@/tools/checkpoint.js'
@@ -185,7 +185,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           case 'tool_use_start': {
             // 渲染"📖 调用 {tool}"提示（input 截断到 80 字符避免刷屏）
             const inputStr = JSON.stringify(event.input) ?? ''
-            const note = `${toolEmoji(event.tool)} ${event.tool}: ${inputStr.slice(0, 80)}`
+            const note = `${toolTag(event.tool)} ${inputStr.slice(0, 80)}`
             setHistory((h) => [
               ...h,
               { role: 'assistant', text: note },
@@ -194,8 +194,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           }
           case 'tool_result': {
             const note = event.ok
-              ? `${toolEmoji(event.tool)} 搞定 ${event.tool}`
-              : `${toolEmoji(event.tool)} 搞砸了 ${event.tool}: ${event.content}`
+              ? `${STATUS.ok} ${event.tool}`
+              : `${STATUS.fail} ${event.tool}: ${event.content}`
             setHistory((h) => [
               ...h,
               { role: 'assistant', text: note },
@@ -299,7 +299,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     let planText = ''
     setHistory((h) => [
       ...h,
-      { role: 'user' as const, text: `📋 [计划模式] ${requirement}` },
+      { role: 'user' as const, text: `[PLAN]  ${requirement}` },
       { role: 'assistant' as const, text: '' },
     ])
     try {
@@ -352,7 +352,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     const ac = new AbortController()
     abortRef.current = ac
     setRunning(true)
-    setHistory((h) => [...h, { role: 'user' as const, text: `🎯 [目标] ${goal}` }])
+    setHistory((h) => [...h, { role: 'user' as const, text: `[GOAL]  ${goal}` }])
     try {
       for await (const event of runGoal({
         goal,
@@ -368,7 +368,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
       })) {
         switch (event.type) {
           case 'goal_start':
-            setHistory((h) => [...h, { role: 'assistant' as const, text: `🎯 目标：${event.goal}（最多 ${event.maxTurns} 轮）\n` }])
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `[GOAL] ${event.goal}（最多 ${event.maxTurns} 轮）\n` }])
             break
           case 'goal_turn_start':
             setHistory((h) => [...h, { role: 'assistant' as const, text: `\n--- 第 ${event.turn} 轮工作 ---\n` }, { role: 'assistant' as const, text: '' }])
@@ -384,10 +384,10 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             })
             break
           case 'goal_tool':
-            setHistory((h) => [...h, { role: 'assistant' as const, text: `  📖 ${event.tool}: ${event.summary}` }])
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `  ${toolTag(event.tool)} ${event.summary}` }])
             break
           case 'goal_checking':
-            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n🔍 检查目标是否达成...` }])
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n[CHECK] 查目标达成没...` }])
             break
           case 'goal_achieved':
             setHistory((h) => [...h, { role: 'assistant' as const, text: `\n目标算是达成了（折腾了 ${event.turn} 轮）` }])
@@ -399,7 +399,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             setHistory((h) => [...h, { role: 'assistant' as const, text: `\n被打断了（搞了 ${event.turns} 轮）` }])
             break
           case 'goal_error':
-            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n❌ 目标执行错误: ${event.error}` }])
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n[FAIL] 目标出错: ${event.error}` }])
             break
         }
       }
@@ -419,13 +419,13 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     setRunning(true)
     setHistory((h) => [
       ...h,
-      { role: 'user' as const, text: `🔧 [工作流] ${requirement}` },
+      { role: 'user' as const, text: `[FLOW]  ${requirement}` },
     ])
     const stageLabels: Record<WorkflowStage, string> = {
-      understand: '🧠 理解需求',
-      implement: '⚙️ 实现代码',
-      verify: '✅ 验证测试',
-      summarize: '📋 回顾汇报',
+      understand: '[THINK] 理解',
+      implement: '[BUILD] 实现',
+      verify: '[PASS] 验证',
+      summarize: '[DONE] 回顾',
     }
     try {
       for await (const event of runWorkflow({
@@ -464,7 +464,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           case 'workflow_tool':
             setHistory((h) => [
               ...h,
-              { role: 'assistant' as const, text: `  📖 ${event.tool}: ${event.summary}` },
+              { role: 'assistant' as const, text: `  ${toolTag(event.tool)} ${event.summary}` },
             ])
             break
           case 'workflow_stage_end':
@@ -479,13 +479,13 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           case 'workflow_aborted':
             setHistory((h) => [
               ...h,
-              { role: 'assistant' as const, text: `\n⚠ 工作流被中断（已完成阶段：${event.completedStages.join(', ') || '无'}）` },
+              { role: 'assistant' as const, text: `\n[WARN] 工作流被中断（已完成阶段：${event.completedStages.join(', ') || '无'}）` },
             ])
             break
           case 'workflow_error':
             setHistory((h) => [
               ...h,
-              { role: 'assistant' as const, text: `\n❌ ${event.stage} 阶段错误: ${event.error}` },
+              { role: 'assistant' as const, text: `\n[FAIL] ${event.stage} 阶段: ${event.error}` },
             ])
             break
         }
@@ -528,7 +528,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
       return
     }
     const ok = await restoreCheckpoint(process.cwd(), target.id)
-    setHistory((h) => [...h, { role: 'assistant' as const, text: ok ? `✓ 已恢复 ${target.originalPath}` : `❌ 恢复失败` }])
+    setHistory((h) => [...h, { role: 'assistant' as const, text: ok ? `[ OK ] 已恢复 ${target.originalPath}` : `[FAIL] 恢复失败` }])
   }
 
   // v1.12: /less-permission-prompts 分析历史并生成 allowlist 建议
@@ -676,12 +676,12 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         await writeFile(targetPath, generateTemplate(process.cwd()), 'utf8')
         setHistory((h) => [
           ...h,
-          { role: 'assistant' as const, text: `✓ 已生成 ${targetPath}\n编辑它来约定 agent 在本项目的行为，提交 git 让全团队共享。` },
+          { role: 'assistant' as const, text: `[ OK ] 已生成 ${targetPath}\n编辑它来约定 agent 在本项目的行为，提交 git 让全团队共享。` },
         ])
       } catch (e) {
         setHistory((h) => [
           ...h,
-          { role: 'assistant' as const, text: `❌ 生成失败: ${String(e)}` },
+          { role: 'assistant' as const, text: `[FAIL] 生成失败: ${String(e)}` },
         ])
       }
       return
@@ -752,7 +752,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         ...h,
         {
           role: 'assistant',
-          text: `✓ 已恢复会话（${msgs.length} 条消息）`,
+          text: `[ OK ] 已恢复会话（${msgs.length} 条消息）`,
         },
       ])
       setInput('')
@@ -1079,13 +1079,11 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
 
   return (
     <Box flexDirection="column">
-      {/* 欢迎框：🖕 + 暴躁欢迎语 */}
-      <Box flexDirection="column" borderStyle="round" borderColor="red" paddingX={1} paddingY={0}>
-        <Text bold color="red">
-          {LOGO} fuckcode <Text dimColor>v{version}</Text>
-          {currentModel && <Text dimColor> · {currentModel}</Text>}
-        </Text>
-        <Text dimColor italic>{attitudeFor('welcome')}</Text>
+      {/* ASCII Banner（Spring Boot 式）+ 暴躁标语 */}
+      <Box flexDirection="column" marginBottom={0}>
+        <Text color="red" bold>{BANNER}</Text>
+        <Text dimColor>                                          v{version}{currentModel ? ` · ${currentModel}` : ''}</Text>
+        <Text color="yellow" italic>  {TAGLINE}  {attitudeFor('welcome')}</Text>
       </Box>
 
       {/* 消息流：user 和 assistant 视觉分明 */}
@@ -1100,9 +1098,9 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
           )
         }
         // assistant 消息：无前缀，白色/默认色
-        // 工具调用类消息（以 📖/✓/✗/🔧/📋/🎯/⚠ 开头）用 dim 色
-        const isToolCall = /^[📖✓✗🔧📋🎯⚠❌]/.test(m.text)
-        const isSectionHeader = /^---|^✨|^✅目标|^⚠目标/.test(m.text)
+        // 工具调用类消息（以 [TAG] 开头）用 dim 色
+        const isToolCall = /^\s*\[/.test(m.text)
+        const isSectionHeader = /^---|齐活了|目标算是/.test(m.text)
         if (isToolCall) {
           return (
             <Box key={i} flexDirection="column" marginLeft={2}>
@@ -1142,7 +1140,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       {/* 权限弹窗 */}
       {pendingPermission && (
         <Box marginTop={1} flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
-          <Text color="yellow" bold>⚠ {pendingPermission.tool}</Text>
+          <Text color="yellow" bold>[WARN] {pendingPermission.tool}</Text>
           <Text>{pendingPermission.summary.slice(0, 80)}</Text>
           <Text dimColor>[y] 允许 · [n] 拒绝 · [Ctrl+C] 拒绝</Text>
         </Box>

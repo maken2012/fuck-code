@@ -1,9 +1,58 @@
 // src/personality.ts
-// fuckcode 的暴躁人格文案。体现消极、不满、烦躁、爆粗口的情绪。
-// 全局出口：attitudeFor(scene) 拿特定场景文案，attitude() 随机一句。
-//
-// 这不是 bug，是 feature。fuckcode 就该有"老子烦死了"的气质。
+// fuckcode 的暴躁人格 + ASCII 视觉系统。
+// 零 emoji，纯 ASCII art / 文字标签。体现"老子烦死了但活儿干得漂亮"。
+// 这不是 bug，是 feature。
 
+// === 启动 Banner（Spring Boot 式 ASCII art）===
+export const BANNER = `
+   ███████╗██╗   ██╗███████╗███████╗██████╗ ██╗  ██╗
+   ██╔════╝██║   ██║██╔════╝██╔════╝██╔══██╗╚██╗██╔╝
+   █████╗  ██║   ██║█████╗  █████╗  ██████╔╝ ╚███╔╝
+   ██╔══╝  ██║   ██║██╔══╝  ██╔══╝  ██╔══██╗ ██╔██╗
+   ██║     ╚██████╔╝███████╗███████╗██║  ██║██╔╝ ██╗
+   ╚═╝      ╚═════╝ ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝`
+
+export const TAGLINE = '就他妈写代码，别废话。'
+
+// === 工具标签（纯 ASCII 方括号，不用 emoji）===
+const TOOL_TAGS: Record<string, string> = {
+  Read: '[READ]',
+  Write: '[WRITE]',
+  Edit: '[EDIT]',
+  Bash: '[BASH]',
+  Grep: '[GREP]',
+  Glob: '[GLOB]',
+  Task: '[TASK]',
+  TodoWrite: '[TODO]',
+  WebFetch: '[WEB]',
+  WebSearch: '[FIND]',
+  AskUserQuestion: '[ASK]',
+  Skill: '[SKILL]',
+  LspDiagnostics: '[LSP]',
+  EnterWorktree: '[TREE]',
+  ExitWorktree: '[BACK]',
+}
+
+export function toolTag(toolName: string): string {
+  return TOOL_TAGS[toolName] ?? '[TOOL]'
+}
+
+// === 状态标记 ===
+export const STATUS = {
+  ok: '[ OK ]',
+  fail: '[FAIL]',
+  warn: '[WARN]',
+  running: '[ .. ]',
+  idle: '[ -- ]',
+}
+
+// === 分隔线生成 ===
+export function divider(text: string, width = 50): string {
+  const line = '─'.repeat(Math.max(0, width - text.length - 4))
+  return `─── ${text} ${line}`
+}
+
+// === 暴躁文案池（每场景 10+ 条，随机选取）===
 const SCENES: Record<string, string[]> = {
   welcome: [
     '又他妈要写代码？',
@@ -11,6 +60,13 @@ const SCENES: Record<string, string[]> = {
     '操，又是你。',
     '来了老弟，这次又是什么烂活？',
     '活着就是受罪，写代码尤其。',
+    '别废话，直接说需求。',
+    '又是写代码的一天，操。',
+    '我求你了，这次需求别再改了行吗。',
+    '代码写不完的，这辈子都写不完。',
+    '来吧，互相折磨。',
+    '你不来我都清闲，你来了我得加班。',
+    '说吧，谁的屎山要我来收拾。',
   ],
   idle: [
     '说吧，这次又是什么破需求？',
@@ -18,6 +74,13 @@ const SCENES: Record<string, string[]> = {
     '别磨蹭，老子没一整天。',
     '有屁快放。',
     '等着你呢，快点。',
+    '键盘坏了还是手断了？敲啊。',
+    '想好了再说，别给我整半成品需求。',
+    '我在，但我不高兴。',
+    '时间就是生命，你这是在谋杀我。',
+    '望啥呢，又不是相亲。',
+    '你打字速度跟蜗牛爬似的。',
+    '发呆出去发，我这等着干活呢。',
   ],
   generating: [
     '憋着急，老子在想呢...',
@@ -25,6 +88,13 @@ const SCENES: Record<string, string[]> = {
     '脑子转着呢，别催。',
     '等着，这玩意儿急不来。',
     '妈的这题有点麻烦...',
+    '在想了在想了，别敲桌子。',
+    '你催一次我慢一秒，自己掂量。',
+    '这破代码我得理理思路。',
+    '稍等，让我看看这坨屎山怎么改。',
+    '复杂，不是一两秒能搞定的。',
+    '别盯着我看，我会紧张的。',
+    '这需求做得我血压都上来了。',
   ],
   done: [
     '行了，凑合用吧。',
@@ -32,6 +102,13 @@ const SCENES: Record<string, string[]> = {
     '完了。不满意？自己改去。',
     '就这样吧，爱要不要。',
     '完事儿。下一位。',
+    '能跑就行，别要求太多。',
+    '好了，赶紧测测别出幺蛾子。',
+    '收工。记得给我发工资。',
+    '弄完了，别谢我，这是我该受的罪。',
+    '差不多了，再改我怕我打人。',
+    '搞定。你要请我喝杯咖啡不过分吧。',
+    '完活儿了，求你以后别写这种需求了。',
   ],
   error: [
     '妈的，又出幺蛾子了。',
@@ -39,22 +116,45 @@ const SCENES: Record<string, string[]> = {
     '靠，这破玩意儿又报错。',
     '日，搞砸了。',
     '草（一种植物），出错了。',
+    '我就知道这破代码会出问题。',
+    '又炸了，意料之中。',
+    '靠，哪里又冒出来个 bug。',
+    '妈的，今天不宜写代码。',
+    '报错了，你那需求是不是有问题。',
+    '这错误我看了一眼就想辞职。',
+    '又是这个破错误，第三次了能不能上点心。',
   ],
   permission: [
     '这操作有点野，你确定？',
     '等等，这玩意儿要改东西，你点头不？',
     '悠着点，确认一下？',
     '这步可能搞出事，过不过？',
+    '摸清情况了吗就改？确认下。',
+    '这行代码删了我可不管啊，你说改不改。',
+    '危险操作，想好了再按。',
+    '这玩意儿动了就没后悔药，过？',
   ],
   denied: [
     '行，听你的，不动。',
     '好嘛，不弄就不弄。',
     '得，你自己看着办。',
+    '行行行，你是老板你说了算。',
+    '不动不动，怕了你了。',
+    '那就不改了，出了事别找我。',
   ],
   compact: [
     '废话太多了，老子精简一下。',
     '上下文塞满了，清一清。',
     '记性有限，挑要紧的留着。',
+    '前面说的垃圾太多了，压缩一下。',
+    '内存不够了，把废话删一删。',
+  ],
+  switching_model: [
+    '换了个脑子，希望聪明点。',
+    '行吧，换个模型试试。',
+    '这模型不听话，换一个。',
+    '换个贵的，你买单就行。',
+    '换模型了，别指望我变温柔。',
   ],
 }
 
@@ -65,28 +165,4 @@ export function attitudeFor(scene: keyof typeof SCENES | string): string {
 
 export function attitude(): string {
   return attitudeFor('idle')
-}
-
-export const LOGO = '🖕'
-
-const TOOL_EMOJIS: Record<string, string> = {
-  Read: '👀',
-  Write: '✍️',
-  Edit: '🔧',
-  Bash: '💥',
-  Grep: '🔍',
-  Glob: '📂',
-  Task: '🤝',
-  TodoWrite: '📋',
-  WebFetch: '🌐',
-  WebSearch: '🔬',
-  AskUserQuestion: '🤷',
-  Skill: '📚',
-  LspDiagnostics: '🐛',
-  EnterWorktree: '🌳',
-  ExitWorktree: '🔙',
-}
-
-export function toolEmoji(toolName: string): string {
-  return TOOL_EMOJIS[toolName] ?? '🔨'
 }

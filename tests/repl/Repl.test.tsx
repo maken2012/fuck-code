@@ -85,10 +85,11 @@ test('Repl 渲染欢迎语和输入框', () => {
   )
   unmount()
   const frame = lastFrame() ?? ''
-  expect(frame).toContain('fuckcode')
+  // ASCII banner 含 ██ 字符 + 版本号 + 模型名 + 标语
   expect(frame).toContain('0.1.0-test')
   expect(frame).toContain('claude-sonnet-4-5')
-  expect(frame).toMatch(/输入|>|(❯)/) // 输入框提示符
+  expect(frame).toContain('就他妈写代码') // TAGLINE
+  expect(frame).toMatch(/██/) // ASCII art
 })
 
 test('Repl 显示快捷键提示', () => {
@@ -97,7 +98,7 @@ test('Repl 显示快捷键提示', () => {
   )
   unmount()
   const frame = lastFrame() ?? ''
-  // v1.13: 底部状态栏含模型名 + 暴躁文案
+  // banner + 状态栏含模型名
   expect(frame).toContain('暴躁模型')
-  expect(frame).toContain('fuckcode') // 欢迎框
+  expect(frame).toContain('就他妈写代码') // TAGLINE
 })

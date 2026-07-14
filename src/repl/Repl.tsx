@@ -101,6 +101,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const [currentModel, setCurrentModel] = useState(initialModel ?? 'claude-sonnet-4-5-20250929')
   const { exit } = useApp()
   const [input, setInput] = useState('')
+  // 深度比对修复 #1: 光标 offset（行内编辑）
+  const [cursorOffset, setCursorOffset] = useState(0)
   // v1.2: 输入历史（↑↓ 浏览）
   const inputHistoryRef = useRef<string[]>([])
   const historyIndexRef = useRef<number>(-1) // -1 表示当前输入，>=0 表示浏览历史第 N 项
@@ -946,6 +948,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         ])
       }
       setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
       return true
     }
     if (text.startsWith('/resume ')) {
@@ -958,6 +962,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
           { role: 'assistant', text: '无效的序号。先 /sessions 查看列表。' },
         ])
         setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
         return true
       }
       const msgs = await loadMessages(target.id, process.cwd()).catch(
@@ -974,6 +980,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         },
       ])
       setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
       return true
     }
     return false
@@ -996,6 +1004,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         chatHistoryRef.current = []
         setHistory([])
         setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
       },
       { requiresRunning: false },
     )
@@ -1008,6 +1018,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
           text: `本次会话用量：输入 ${t.input} / 输出 ${t.output} / 缓存读 ${t.cacheRead} tokens`,
         }])
         setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
       },
     )
     reg.register(
@@ -1024,6 +1036,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
           }])
         }
         setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
       },
     )
     reg.register(
@@ -1059,6 +1073,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
           text: `可用命令（输入 / 后实时提示）：\n\n【工作流】\n  /workflow <需求>  四阶段工作流\n  /goal <目标>      目标驱动\n  /plan <需求>      只读计划\n\n【上下文】\n  /context /diff /rewind /cost\n\n【模型】\n  /model [名] /less-perms\n\n【项目】\n  /init /agents /sessions /resume /skills /clear\n\n  /exit 退出`,
         }])
         setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
       },
       { aliases: ['/?'] },
     )
@@ -1137,6 +1153,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
           }
         }
         setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
       },
     )
 
@@ -1189,6 +1207,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
     // UX: Esc 清空输入
     if (inputChar === '\x1b' || key.escape) {
       setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
       setCmdHintIndex(0)
       return
     }
@@ -1199,13 +1219,17 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       return
     }
     // 深度比对修复 #6: Ctrl+W 删词、Ctrl+U 清行、Ctrl+K 删到行尾
+    // 深度比对修复 #1: Ctrl+U 清到行首（不是清整行——保留光标后半段）
     if (key.ctrl && inputChar === 'u') {
-      setInput('')
+      setInput((s) => s.slice(cursorOffset))
+      setCursorOffset(0)
       return
     }
     if (key.ctrl && inputChar === 'k') {
       // Ctrl+K: 删到行尾（当前 input 就是单行，等同清空）
       setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
       return
     }
     if (key.ctrl && inputChar === 'w') {
@@ -1216,6 +1240,24 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         return lastSpace === -1 ? '' : trimmed.slice(0, lastSpace + 1)
       })
       return
+    }
+
+    // 深度比对修复 #1: 光标移动（左/右/Ctrl+A/E/Home/End）
+    if (!key.ctrl && !key.meta) {
+      if (key.leftArrow) {
+        setCursorOffset((o) => Math.max(0, o - 1))
+        return
+      }
+      if (key.rightArrow) {
+        setCursorOffset((o) => Math.min(input.length, o + 1))
+        return
+      }
+    }
+    if (key.ctrl) {
+      if (inputChar === 'a') { setCursorOffset(0); return }        // Ctrl+A 行首
+      if (inputChar === 'e') { setCursorOffset(input.length); return } // Ctrl+E 行尾
+      if (inputChar === 'b') { setCursorOffset((o) => Math.max(0, o - 1)); return } // Ctrl+B 左移
+      if (inputChar === 'f') { setCursorOffset((o) => Math.min(input.length, o + 1)); return } // Ctrl+F 右移
     }
 
     // 计算当前输入匹配的命令（实时）
@@ -1246,6 +1288,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         const registry = commandRegistryRef.current
         void registry.tryExecute(text, running).then((handled) => {
           if (handled) setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
         })
         // tryExecute 是异步的——先 return 阻止后续处理（tryExecute 内部已经调了 handler）
         if (registry.match(text).length > 0) return
@@ -1257,6 +1301,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         const cmdArgs = text.slice(1 + cmdName.length).trim()
         if (cmdName && !running) {
           setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
           void handleCustomCommand(cmdName, cmdArgs)
           return
         }
@@ -1272,6 +1318,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         }
         historyIndexRef.current = -1
         setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
         void runQuery(text)
       }
       return
@@ -1296,15 +1344,20 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         if (historyIndexRef.current >= history.length) {
           historyIndexRef.current = -1 // 回到当前输入
           setInput('')
+        setCursorOffset(0)
+        setCursorOffset(0)
         } else {
           setInput(history[historyIndexRef.current] ?? '')
         }
       }
       return
     }
-    // 退格
+    // 退格——删除光标前一个字符（深度比对 #1: 支持中间位置删除）
     if (key.backspace || key.delete) {
-      setInput((s) => s.slice(0, -1))
+      if (cursorOffset > 0) {
+        setInput((s) => s.slice(0, cursorOffset - 1) + s.slice(cursorOffset))
+        setCursorOffset((o) => Math.max(0, o - 1))
+      }
       return
     }
     // 普通文本输入（支持中文 IME 一次提交多个字符 + 粘贴）
@@ -1318,11 +1371,17 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       // 深度比对修复 #10: 大段粘贴截断（超 10000 字符截断防卡死）
       const MAX_INPUT = 10000
       if (isValidChar || inputChar === ' ') {
+        // 深度比对修复 #1: 在 cursorOffset 处插入而非末尾追加
         setInput((s) => {
-          if (s.length + inputChar.length > MAX_INPUT) {
-            return s + inputChar.slice(0, MAX_INPUT - s.length) + '\n[输入过长，已截断]'
+          const before = s.slice(0, cursorOffset)
+          const after = s.slice(cursorOffset)
+          const newInput = before + inputChar + after
+          if (newInput.length > MAX_INPUT) {
+            return newInput.slice(0, MAX_INPUT) + '\n[输入过长，已截断]'
           }
-          return s + inputChar
+          // 光标跟随移动
+          setCursorOffset(before.length + inputChar.length)
+          return newInput
         })
       }
     }
@@ -1350,7 +1409,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       )}
 
       {/* 输入框——委托给 InputBox 子组件 */}
-      <InputBox input={input} running={running} visible={!pendingPermission} />
+      <InputBox input={input} running={running} visible={!pendingPermission} cursorOffset={cursorOffset} />
 
       {/* 实时命令提示——委托给 CommandHints 子组件 */}
       <CommandHints

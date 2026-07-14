@@ -952,17 +952,27 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         setCursorOffset(0)
       return true
     }
+    // 深度比对第 17 轮: /resume 无参数时自动列出会话（省一步）
+    if (text === '/resume') {
+      // 走 /sessions 的逻辑
+      return handleSessionCommand('/sessions')
+    }
     if (text.startsWith('/resume ')) {
       const idx = parseInt(text.split(' ')[1] ?? '', 10) - 1
       const sessions = sessionsListRef.current
-      const target = Number.isNaN(idx) ? undefined : sessions[idx]
+      // 如果 sessionsListRef 空，先加载
+      if (sessions.length === 0) {
+        const allSessions = await listSessions(process.cwd())
+        sessionsListRef.current = allSessions
+      }
+      const currentSessions = sessionsListRef.current
+      const target = Number.isNaN(idx) ? undefined : currentSessions[idx]
       if (!target) {
         setHistory((h) => [
           ...h,
-          { role: 'assistant', text: '无效的序号。先 /sessions 查看列表。' },
+          { role: 'assistant', text: `无效序号。可用会话：\n${currentSessions.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}` },
         ])
         setInput('')
-        setCursorOffset(0)
         setCursorOffset(0)
         return true
       }

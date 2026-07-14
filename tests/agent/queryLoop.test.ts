@@ -755,7 +755,7 @@ test('M5 autoCompact：超过阈值触发压缩，yield compacted + writeCompact
   // 应有 compacted 事件
   const compacted = events.find((e) => e.type === 'compacted')
   if (compacted && compacted.type === 'compacted') {
-    expect(compacted.summary).toBe('这是摘要')
+    expect(compacted.summary).toContain('这是摘要')
   } else {
     throw new Error('missing compacted event')
   }

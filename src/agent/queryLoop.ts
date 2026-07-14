@@ -213,11 +213,12 @@ export async function* queryLoop(
         }
       }
       // M5：每轮调 LLM 前检查 token 是否超阈值 → 触发压缩。
-      // 用 estimateMessagesTokens 粗估；超阈值就 compactConversation 生成摘要。
+      // 深度比对第 17 轮: 改进触发提示——显示压缩前后 token 数
       if (
         opts.sessionId &&
         estimateMessagesTokens(messages) > compactThreshold
       ) {
+        const tokensBefore = estimateMessagesTokens(messages)
         const summary = await compactConversation(messages, {
           model: opts.model,
           apiKey: opts.apiKey,
@@ -249,7 +250,10 @@ export async function* queryLoop(
           // 重置持久化队列：boundary 已通过 writeCompactBoundary 落盘，
           // 不需要 pendingPersist 重复写它。
           pendingPersist = []
-          yield { type: 'compacted', summary }
+          // 深度比对第 17 轮: 显示压缩前后 token 数
+          const tokensAfter = estimateMessagesTokens(messages)
+          const saved = tokensBefore - tokensAfter
+          yield { type: 'compacted', summary: `上下文已压缩：${tokensBefore} → ${tokensAfter} tokens（省 ${saved}）\n${summary.slice(0, 100)}` }
         }
       }
 

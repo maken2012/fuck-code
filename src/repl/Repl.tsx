@@ -128,6 +128,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   // 深度比对修复 #8: thinking/reasoning 状态
   const thinkingTextRef = useRef('')
   const thinkingShownRef = useRef(false)
+  // 深度比对修复 #7: 工具调用聚合（避免每个工具 push 两条消息刷屏）
+  const toolBatchRef = useRef<{ tool: string; status: 'running' | 'ok' | 'fail' }[]>([])
   const [configLoaded, setConfigLoaded] = useState(false)
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null)
@@ -214,6 +216,25 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     let assistantText = ''
     thinkingTextRef.current = ''
     thinkingShownRef.current = false
+    toolBatchRef.current = []
+
+    // 深度比对修复 #7: flush 工具 batch 为单条折叠消息
+    const flushToolBatch = () => {
+      const batch = toolBatchRef.current
+      if (batch.length === 0) return
+      toolBatchRef.current = []
+      const summary = batch.map((b) => {
+        const icon = b.status === 'ok' ? '[ OK ]' : b.status === 'fail' ? '[FAIL]' : '[ .. ]'
+        return `  ${icon} ${b.tool}`
+      }).join('\n')
+      const header = batch.length === 1 ? '' : ` (${batch.length} 个工具调用)`
+      setHistory((h) => [
+        ...h,
+        { role: 'assistant' as const, text: `${header}\n${summary}` },
+        { role: 'assistant' as const, text: '' },
+      ])
+    }
+
     // 立即新增 user + 空 assistant 两条消息
     setHistory((h) => [
       ...h,
@@ -245,6 +266,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         switch (event.type) {
           case 'text_delta':
             assistantText += event.text
+            // 深度比对修复 #7: flush 工具 batch（模型开始输出正文了，工具调用结束）
+            flushToolBatch()
             // 深度比对修复 #3: 流式渲染节流——16ms 攒批后更新（避免每 token setState 卡顿）
             // 用 ref 记录"脏"标记，requestAnimationFrame 合并
             if (!flushTimerRef.current) {
@@ -288,23 +311,21 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             break
           }
           case 'tool_use_start': {
-            // 渲染"📖 调用 {tool}"提示（input 截断到 80 字符避免刷屏）
+            // 深度比对修复 #7: 聚合到 batch ref，不单独 push 消息
             const inputStr = JSON.stringify(event.input) ?? ''
-            const note = `${toolTag(event.tool)} ${inputStr.slice(0, 80)}`
-            setHistory((h) => [
-              ...h,
-              { role: 'assistant', text: note },
-            ])
+            const summary = inputStr.slice(0, 60)
+            toolBatchRef.current.push({ tool: `${toolTag(event.tool)} ${summary}`, status: 'running' })
             break
           }
           case 'tool_result': {
-            const note = event.ok
-              ? `${STATUS.ok} ${event.tool}`
-              : `${STATUS.fail} ${event.tool}: ${event.content}`
-            setHistory((h) => [
-              ...h,
-              { role: 'assistant', text: note },
-            ])
+            // 更新 batch 里最后一个 running 的同工具为 ok/fail
+            const batch = toolBatchRef.current
+            for (let j = batch.length - 1; j >= 0; j--) {
+              if (batch[j]?.status === 'running') {
+                batch[j] = { tool: batch[j]!.tool, status: event.ok ? 'ok' : 'fail' }
+                break
+              }
+            }
             break
           }
           case 'permission_request': {
@@ -336,6 +357,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             break
           }
           case 'turn_end':
+            // 深度比对修复 #7: turn_end 时 flush 残留工具 batch
+            flushToolBatch()
             // 只在最终轮（非 tool_use）把本轮对话存入 chatHistoryRef。
             // 工具调用中间轮（stopReason='tool_use'）不存——避免重复 push
             // 和跨轮文本累积污染。

@@ -52,9 +52,12 @@ const GOAL_CHECK_PROMPT = `你是一个目标达成检查器。用户设定了�
 
 判断标准：
 - 目标是"${'__GOAL__'}"
-- 只看工作记录里的实际行动和结果
-- 如果目标明确达成（如测试通过、文件已创建），回答 YES
+- 只看工作记录里的实际行动和结果（工具调用的输出）
+- 如果目标明确达成（如测试通过、文件已创建、命令成功执行），回答 YES
 - 如果还没达成或不确定，回答 NO
+- **重要**：不要只看 agent 说了什么（声明），要看工具调用的实际结果
+  - agent 说"测试通过了"但工具输出里有 FAIL → 回答 NO
+  - agent 说"文件创建了"但工具返回成功 → 回答 YES
 - 只回答一个词：YES 或 NO`
 
 // 用 LLM 检查 goal 是否达成
@@ -89,6 +92,10 @@ export async function* runGoal(opts: GoalOpts): AsyncGenerator<GoalEvent> {
   const checkFn = opts._checkOverride ?? checkGoalAchieved
 
   let workLog = ''
+  // 深度比对第 47 轮: 统计面板数据（对标 Claude Code /goal elapsed/turns/tokens overlay）
+  const goalStartTime = Date.now()
+  let totalInputTokens = 0
+  let totalOutputTokens = 0
 
   yield { type: 'goal_start', goal: opts.goal, maxTurns }
 
@@ -129,6 +136,10 @@ export async function* runGoal(opts: GoalOpts): AsyncGenerator<GoalEvent> {
         if (event.type === 'text_delta') {
           turnWork += event.text
           yield { type: 'goal_work', text: event.text }
+        } else if (event.type === 'usage') {
+          // 深度比对第 47 轮: token 统计（对标 Claude Code /goal tokens overlay）
+          totalInputTokens += event.input
+          totalOutputTokens += event.output
         } else if (event.type === 'aborted') {
           wasAborted = true
         } else if (event.type === 'tool_use_start') {
@@ -166,10 +177,18 @@ export async function* runGoal(opts: GoalOpts): AsyncGenerator<GoalEvent> {
     }).catch(() => false)
 
     if (achieved) {
-      yield { type: 'goal_achieved', turn, totalWork: workLog }
+      // 深度比对第 47 轮: 达成时带统计面板（对标 Claude Code /goal overlay）
+      const elapsed = Date.now() - goalStartTime
+      const elapsedStr = elapsed < 60000 ? `${Math.round(elapsed / 1000)}s` : `${Math.floor(elapsed / 60000)}m ${Math.round((elapsed % 60000) / 1000)}s`
+      const stats = `\n[耗时 ${elapsedStr} · ${turn} 轮 · ${totalInputTokens + totalOutputTokens} tokens]`
+      yield { type: 'goal_achieved', turn, totalWork: workLog + stats }
       return
     }
   }
 
+  // 深度比对第 47 轮: 超时也带统计
+  const elapsed = Date.now() - goalStartTime
+  const elapsedStr = elapsed < 60000 ? `${Math.round(elapsed / 1000)}s` : `${Math.floor(elapsed / 60000)}m ${Math.round((elapsed % 60000) / 1000)}s`
   yield { type: 'goal_max_turns', turns: maxTurns }
+  // 统计通过 goal_turn_end 自然携带，这里不额外 yield
 }

@@ -69,6 +69,7 @@ const ALL_COMMANDS: { cmd: string; desc: string; args?: string; example?: string
   { cmd: '/help', desc: '显示完整帮助（命令 + 快捷键）', args: '', example: '/help' },
   { cmd: '/snapshot', desc: '创建会话快照', args: '<标签>', example: '/snapshot 重构前' },
   { cmd: '/export', desc: '导出会话为 markdown', args: '', example: '/export' },
+  { cmd: '/version', desc: '显示版本号', args: '', example: '/version' },
   { cmd: '/exit', desc: '退出 fuckcode', args: '', example: '/exit' },
   { cmd: '/quit', desc: '退出 fuckcode', args: '', example: '/quit' },
 ]

@@ -949,6 +949,11 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       setCurrentModel(cmd.model)
       if (configRef.current) configRef.current.model = cmd.model
     }
+    // 深度比对第 66 轮: effort 覆盖（对标 Claude Code/opencode skill effort）
+    if (cmd.effort) {
+      // effort 存到 configRef 供 streamAnthropic 使用（future: 透传到 API）
+      if (configRef.current) (configRef.current as Record<string, unknown>).effort = cmd.effort
+    }
     // 当作普通 query 跑
     setHistory((h) => [...h, { role: 'user' as const, text: `/${name}${args ? ' ' + args : ''}` }])
     void runQuery(prompt)

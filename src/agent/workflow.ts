@@ -183,19 +183,26 @@ export async function* runWorkflow(opts: WorkflowOpts): AsyncGenerator<WorkflowE
           case 'done':
             break
           case 'error':
+            // 深度比对第 31 轮: 阶段失败不终止整个 workflow——记录错误，继续下一阶段
             yield { type: 'workflow_error', stage, error: event.error.message }
-            break
+            stageOutput += `\n\n[本阶段出错: ${event.error.message}]`
+            break // 不 return——继续到 stage_end
           case 'aborted':
             yield { type: 'workflow_aborted', completedStages }
             return
         }
       }
     } catch (e) {
-      yield { type: 'workflow_error', stage, error: String(e) }
-      return
+      // 深度比对第 31 轮: 阶段异常不终止——记录错误继续
+      stageOutput += `\n\n[本阶段异常: ${String(e)}]`
     }
 
+    // 深度比对第 31 轮: 上下文截断（防后阶段 prompt 过长）
+    const MAX_CONTEXT = 8000
     accumulatedContext += `\n\n### ${stage} 阶段输出\n${stageOutput}`
+    if (accumulatedContext.length > MAX_CONTEXT) {
+      accumulatedContext = accumulatedContext.slice(-MAX_CONTEXT)
+    }
     completedStages.push(stage)
     yield { type: 'workflow_stage_end', stage, output: stageOutput }
   }

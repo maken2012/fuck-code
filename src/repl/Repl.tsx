@@ -599,13 +599,16 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         },
       })) {
         switch (event.type) {
-          case 'workflow_stage_start':
+          case 'workflow_stage_start': {
+            // 深度比对第 31 轮: 进度计数（第 N/4 阶段）
+            const stageNum = ['understand', 'implement', 'verify', 'summarize'].indexOf(event.stage) + 1
             setHistory((h) => [
               ...h,
-              { role: 'assistant' as const, text: `\n--- ${stageLabels[event.stage]} ---\n` },
+              { role: 'assistant' as const, text: `\n--- [${stageNum}/4] ${stageLabels[event.stage]} ---\n` },
               { role: 'assistant' as const, text: '' },
             ])
             break
+          }
           case 'workflow_text': {
             // 追加到当前阶段最后一条 assistant 消息
             setHistory((h) => {

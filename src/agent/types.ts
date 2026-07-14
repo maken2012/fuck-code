@@ -11,6 +11,8 @@ export type PermissionUserDecision = 'allow' | 'deny'
 export type QueryEvent =
   | { type: 'text_delta'; text: string } // 模型流式文本片段
   | { type: 'thinking_delta'; text: string } // thinking/reasoning 片段（深度比对 #8）
+  // 深度比对第 53 轮: 工具执行进度（Bash 长命令实时输出）
+  | { type: 'tool_progress'; tool: string; lines: string[]; totalLines: number; elapsedMs: number }
   // M3 新增：模型决定调用工具（在执行前 yield）
   | { type: 'tool_use_start'; tool: string; input: unknown }
   // M3 新增：工具执行完毕（含成功/失败 + 内容）

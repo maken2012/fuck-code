@@ -366,6 +366,8 @@ export async function* queryLoop(
       // （因为 async generator 的 yield 不能穿透到 Promise 回调）
       // 策略：queryLoop 先做权限检查（含 ask），ToolExecutor 只执行已通过的工具
       const toolResultBlocks: ContentBlock[] = []
+      // 深度比对第 53 轮: 进度事件队列（onProgress 回调写入，yield 循环读出）
+      const pendingProgressQueue: { tool: string; lines: string[]; totalLines: number; elapsedMs: number }[] = []
       const permittedForExec: ToolUseRequest[] = []
 
       for (const tu of toolUses) {
@@ -415,12 +417,28 @@ export async function* queryLoop(
       // 用 ToolExecutor 执行已通过权限检查的工具（并发分组 + 执行 + 结果收集）
       if (permittedForExec.length > 0) {
         const executor = new ToolExecutor(tools, findTool)
+        // 深度比对第 53 轮: onProgress 回调 → yield tool_progress（Bash 长命令实时输出到 REPL）
+        let currentToolName = ''
+        for (const p of permittedForExec) {
+          if (!tools.find((t) => t.name === p.name)?.isConcurrencySafe?.()) {
+            currentToolName = p.name // 记住当前串行工具名
+          }
+        }
         const execBlocks = yield* executor.executePermitted(permittedForExec, {
           cwd: opts.cwd,
           abortSignal: opts.signal,
           readFileState,
           parentHistory: messages,
+          onProgress: (data) => {
+            // onProgress 是回调不是 generator——用 pendingProgress 队列
+            pendingProgressQueue.push({ tool: currentToolName, ...data })
+          },
         })
+        // flush 残留进度
+        while (pendingProgressQueue.length > 0) {
+          const p = pendingProgressQueue.shift()!
+          yield { type: 'tool_progress', tool: p.tool, lines: p.lines, totalLines: p.totalLines, elapsedMs: p.elapsedMs }
+        }
         toolResultBlocks.push(...execBlocks.blocks)
         for (const evt of execBlocks.events) yield evt
         // 深度比对第 20 轮: PostToolUse hook 触发（工具执行后）

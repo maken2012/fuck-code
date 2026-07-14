@@ -352,6 +352,23 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             toolBatchRef.current.push({ tool: `${toolTag(event.tool)} ${summary}`, status: 'running' })
             break
           }
+          case 'tool_progress': {
+            // 深度比对第 53 轮: Bash 长命令实时进度（对标 Claude Code ShellProgressMessage）
+            // 更新 batch 里最后一个 running 的工具进度
+            const batch = toolBatchRef.current
+            for (let j = batch.length - 1; j >= 0; j--) {
+              if (batch[j]?.status === 'running') {
+                const lastLines = event.lines.filter(Boolean).slice(-2).join('\n    ')
+                const dur = event.elapsedMs < 1000 ? `${event.elapsedMs}ms` : `${(event.elapsedMs / 1000).toFixed(0)}s`
+                batch[j] = {
+                  tool: `${batch[j]!.tool}\n    [${dur} · ${event.totalLines} 行] ${lastLines}`,
+                  status: 'running',
+                }
+                break
+              }
+            }
+            break
+          }
           case 'tool_result': {
             // 更新 batch 里最后一个 running 的同工具为 ok/fail
             const batch = toolBatchRef.current

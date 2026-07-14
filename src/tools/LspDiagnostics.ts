@@ -42,19 +42,20 @@ function getProjectHash(cwd: string): string {
 export const LspDiagnosticsTool = buildTool<LspInputType>({
   name: 'LspDiagnostics',
   description: '查 TS/JS 文件的编译诊断（类型错误）',
-  prompt: `查询 TypeScript/JavaScript 文件的 LSP 诊断（类型错误、编译警告）。
+  prompt: `查询 TypeScript/JavaScript 文件的编译诊断（类型错误）。
 
 参数：
-- file_path（必填）：文件绝对路径（.ts/.tsx/.js/.jsx）
+- file_path（必填）：文件绝对路径（.ts/.tsx/.js/.jsx/.mts/.cts）
 
-用途：Edit/Write 改完代码后用它查类型错误，闭环验证。比 Grep 精确得多。
+特性（深度比对第 79 轮增强）：
+- 用 tsc --noEmit 检查整个项目（不只单个文件）
+- 10s 内同项目复用结果（缓存，标记 [cached]）
+- Edit/Write 后自动触发类型检查（无需手动调）
+- 提取该文件相关的错误行 + 显示项目总错误数
+- 首次调用 15s 超时（tsc 需要编译）
+- 非 TS/JS 文件拒绝
 
-要求：
-- 项目需装 typescript + typescript-language-server（全局或本地）
-- 首次调用有启动延迟（LSP 初始化）
-- 只支持 TS/JS 文件
-
-返回：诊断列表（severity/file/line/message），无错误返回"无诊断"。`,
+返回：诊断列表或'无类型错误'。`,
   inputSchema: LspInput,
   jsonSchema: {
     type: 'object',

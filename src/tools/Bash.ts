@@ -85,8 +85,10 @@ export const BashTool = buildTool<BashInputType>({
 
     let child: ChildProcess
     try {
+      // 深度比对第 36 轮: 固定 shell 为 bash（对标 Claude Code exec(cmd, signal, 'bash')）
+      // 避免 zsh/.zshrc 别名和函数污染命令行为（跨平台一致性）
       child = spawn(command, {
-        shell: true,
+        shell: '/bin/bash',  // macOS 自带 bash，Linux 通常也有
         cwd: ctx.cwd,
         // 独立进程组，超时时 kill 整组（避免孤儿子进程）
         detached: true,

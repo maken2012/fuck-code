@@ -5,6 +5,7 @@
 export interface FileReadState {
   mtime: number // 上次 Read 时的文件 mtimeMs
   readAt: number // 时间戳（Date.now()）
+  readRange?: string // 深度比对第 36 轮: 读取的 offset:limit（重复读取去重用）
 }
 export type ReadFileState = Map<string, FileReadState>
 

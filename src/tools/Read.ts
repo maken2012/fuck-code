@@ -98,12 +98,25 @@ export const ReadTool = buildTool<ReadInputType>({
 
       const totalLines = lines.length
       const shownRange = `${start + 1}-${end}`
+
+      // 深度比对第 36 轮: 重复读取去重（对标 Claude Code file_unchanged stub）
+      // 同文件 + 同 offset/limit + mtime 未变 → 返回 stub 省 token
+      const state = ctx.readFileState.get(input.file_path)
+      const reqKey = `${input.offset ?? 1}:${input.limit ?? DEFAULT_LIMIT}`
+      if (state && state.mtime === stats.mtimeMs && state.readRange === reqKey) {
+        return {
+          ok: true,
+          data: `<文件未变化: ${input.file_path}（mtime 未变，内容与上次读取相同，共 ${totalLines} 行）>`,
+        }
+      }
+
       const summary = `\n（共 ${totalLines} 行，显示 ${shownRange}）`
 
-      // M4：记录已读状态（mtime + readAt），供 Edit/Write 写前校验"已读且未被外部修改"
+      // M4：记录已读状态（mtime + readAt + range），供 Edit/Write 写前校验 + 重复读取去重
       ctx.readFileState.set(input.file_path, {
         mtime: stats.mtimeMs,
         readAt: Date.now(),
+        readRange: reqKey,
       })
       // 深度比对第 29 轮: LRU 裁剪（防长会话内存无限增长）
       pruneReadFileState(ctx.readFileState)

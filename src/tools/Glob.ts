@@ -22,7 +22,8 @@ export const GlobTool = buildTool<GlobInputType>({
 - pattern（必填）：glob 模式，如 "**/*.ts"、"src/**/*.test.ts"
 - path（可选）：搜索根目录（必须是目录，不是文件），默认 cwd
 
-返回匹配的文件路径列表（相对路径，按字典序排序）。最多 ${MAX_RESULTS} 条。`,
+返回匹配的文件路径列表（相对路径，按字典序排序）。最多 ${MAX_RESULTS} 条。
+超限提示"用更精确的 pattern 缩小范围"。自动排除 VCS 目录。含耗时统计。`,
   inputSchema: GlobInput,
   jsonSchema: {
     type: 'object',

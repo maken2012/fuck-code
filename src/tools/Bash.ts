@@ -42,15 +42,26 @@ type RunOutcome =
 export const BashTool = buildTool<BashInputType>({
   name: 'Bash',
   description: '执行 shell 命令',
-  prompt: `执行 shell 命令（用 spawn + { shell: true }）。
+  prompt: `执行 shell 命令（固定 /bin/bash，避免 zsh/.zshrc 干扰）。
 
 参数：
 - command（必填）：shell 命令字符串
-- timeout（可选）：超时毫秒，默认 ${DEFAULT_TIMEOUT}（超时会 kill 进程组）
+- timeout（可选）：超时毫秒，默认 ${DEFAULT_TIMEOUT}（超时 SIGTERM 优雅退出 + 3s 后 SIGKILL）
 - run_in_background（可选）：true 时立即返回 pid，不等待命令结束
 
-输出（stdout + stderr）各自最多保留 ${MAX_OUTPUT_CHARS} 字符，超限会被截断并标记 truncated。
-命令非零退出码与超时均视为失败。`,
+安全防护（深度比对第 75 轮增强）：
+- rm -rf 根目录/home/通配 → 拒绝
+- curl/wget 管道到 shell → 拒绝
+- dd/mkfs/chmod 777 根 → 拒绝
+- .env/.ssh/.aws 等凭证文件 → 拒绝
+- git push --force main/master → 拒绝
+
+输出特性：
+- stdout/stderr 各 ${MAX_OUTPUT_CHARS} 字符上限，超限落盘并返回路径
+- 超时返回部分输出（非全丢）
+- 退出码语义识别（git diff exit 1 = 正常，测试 fail != 命令错误）
+- 长命令每 2s 推进度（实时输出最近 3 行）
+- 成功无输出显示 [ OK ]（如 mkdir/ls 空目录）`,
   inputSchema: BashInput,
   jsonSchema: {
     type: 'object',

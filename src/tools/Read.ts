@@ -85,7 +85,24 @@ export const ReadTool = buildTool<ReadInputType>({
       const lines = content.split('\n')
       if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop()
 
+      // 深度比对第 56 轮: 空文件 + offset 越界友好提示（对标 Claude Code FileReadTool）
+      if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) {
+        ctx.readFileState.set(input.file_path, {
+          mtime: stats.mtimeMs,
+          readAt: Date.now(),
+          readRange: `${input.offset ?? 1}:${input.limit ?? DEFAULT_LIMIT}`,
+          lastContent: content.length < 51200 ? content : undefined,
+        })
+        pruneReadFileState(ctx.readFileState)
+        return { ok: true, data: `<文件为空: ${input.file_path}（0 字节）>` }
+      }
+
       const offset = input.offset ?? 1
+      // 深度比对第 56 轮: offset 超出文件行数时友好提示（对标 Claude FileReadTool）
+      if (offset > lines.length) {
+        return { ok: true, data: `<文件只有 ${lines.length} 行，offset=${offset} 超出范围>` }
+      }
+
       const limit = input.limit ?? DEFAULT_LIMIT
       const start = Math.max(0, offset - 1)
       const end = Math.min(lines.length, start + limit)

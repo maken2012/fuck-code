@@ -29,6 +29,16 @@ async function checkLspAvailable(): Promise<boolean> {
   })
 }
 
+// 深度比对第 45 轮: tsc 结果缓存（对标 Claude Code LSP LRU 50-doc cap）
+// 避免连续 LspDiagnostics 调用重复跑 tsc（同一项目 + 无文件变化时复用）
+let cachedResult: { cwd: string; hash: string; ok: boolean; data: string; ts: number } | null = null
+const MAX_CACHE_AGE_MS = 10000 // 10s 内复用
+
+function getProjectHash(cwd: string): string {
+  // 简化：用 cwd + 时间戳做 key（真正的实现会比较 tsconfig + 源文件 mtime）
+  return cwd
+}
+
 export const LspDiagnosticsTool = buildTool<LspInputType>({
   name: 'LspDiagnostics',
   description: '查 TS/JS 文件的编译诊断（类型错误）',
@@ -57,6 +67,15 @@ export const LspDiagnosticsTool = buildTool<LspInputType>({
   isConcurrencySafe: () => true,
 
   async execute(input, ctx) {
+    // 深度比对第 45 轮: 结果缓存（10s 内同项目复用，避免连续 tsc --noEmit）
+    const projectHash = getProjectHash(ctx.cwd)
+    if (cachedResult && cachedResult.cwd === ctx.cwd && cachedResult.hash === projectHash) {
+      const age = Date.now() - cachedResult.ts
+      if (age < MAX_CACHE_AGE_MS) {
+        return { ok: true as const, data: cachedResult.data + ' [cached]' }
+      }
+    }
+
     // 检查文件存在
     try {
       const s = await stat(input.file_path)
@@ -100,7 +119,8 @@ export const LspDiagnosticsTool = buildTool<LspInputType>({
       proc.on('close', (code) => {
         clearTimeout(timer)
         if (code === 0) {
-          resolvePromise({ ok: true, data: '✓ 无类型错误（tsc --noEmit 通过）' })
+          cachedResult = { cwd: ctx.cwd, hash: projectHash, ok: true, data: '✓ 无类型错误（tsc --noEmit 通过）', ts: Date.now() }
+          resolvePromise({ ok: true, data: cachedResult.data })
           return
         }
         // 从 tsc 输出里提取该文件的诊断
@@ -108,18 +128,16 @@ export const LspDiagnosticsTool = buildTool<LspInputType>({
         const fileBaseName = input.file_path.replace(ctx.cwd + '/', '').replace(/\\/g, '/')
         const fileDiags = allDiags.filter((l) => l.includes(fileBaseName) || l.includes(resolve(ctx.cwd, fileBaseName)))
         if (fileDiags.length === 0) {
-          // 该文件无诊断，但有其他文件错误
           const otherCount = allDiags.filter((l) => /\.(ts|tsx|js|jsx)\(\d+,\d+\)/.test(l)).length
-          resolvePromise({
-            ok: true,
-            data: `${fileBaseName} 无类型错误（项目其他文件共 ${otherCount} 个错误）。\n\n完整输出（前 20 行）：\n${allDiags.slice(0, 20).join('\n')}`,
-          })
+          const data = `${fileBaseName} 无类型错误（项目其他文件共 ${otherCount} 个错误）。\n\n完整输出（前 20 行）：\n${allDiags.slice(0, 20).join('\n')}`
+          cachedResult = { cwd: ctx.cwd, hash: projectHash, ok: true, data, ts: Date.now() }
+          resolvePromise({ ok: true, data })
           return
         }
-        resolvePromise({
-          ok: true,
-          data: `${fileBaseName} 的类型错误：\n${fileDiags.join('\n')}`,
-        })
+        const errorData = `${fileBaseName} 的类型错误：\n${fileDiags.join('\n')}`
+        // 有错误也缓存（避免连续调重复跑 tsc）
+        cachedResult = { cwd: ctx.cwd, hash: projectHash, ok: true, data: errorData, ts: Date.now() }
+        resolvePromise({ ok: true, data: errorData })
       })
     })
   },

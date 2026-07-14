@@ -94,9 +94,11 @@ export const TaskTool = buildTool<TaskInputType>({
 
     // 子 agent 用独立 AbortController（子 agent 超时 120s）
     const subAc = new AbortController()
-    const timeout = setTimeout(() => subAc.abort(), 120000)
-    // 父 abort 也传播
-    ctx.abortSignal.addEventListener('abort', () => subAc.abort())
+    const SUB_TIMEOUT = 120000
+    const timeout = setTimeout(() => subAc.abort(), SUB_TIMEOUT)
+    // 父 abort 也传播（深度比对第 16 轮：监听器用完要清理，防内存泄漏）
+    const abortHandler = () => subAc.abort()
+    ctx.abortSignal.addEventListener('abort', abortHandler, { once: true })
 
     // 子 agent 的工具集：
     // - explore：只给只读三件套
@@ -155,9 +157,12 @@ export const TaskTool = buildTool<TaskInputType>({
           // 子 agent 内部错误不传播，记录到结果
           subResult += `\n\n[子 agent 错误: ${event.error.message}]`
         } else if (event.type === 'aborted') {
+          // 深度比对第 16 轮: 友好超时/中断提示
+          const elapsed = Math.round(SUB_TIMEOUT / 1000)
+          const reason = subAc.signal.aborted ? `超时（${elapsed}s）` : '用户中断'
           return {
             ok: false,
-            error: `子 agent 被中断（可能超时 120s 或用户 Ctrl+C）`,
+            error: `子 agent ${reason}。${subResult ? `部分结果:\n${subResult.slice(0, 2000)}` : '无输出。'}`,
             isError: true,
           }
         }
@@ -169,14 +174,23 @@ export const TaskTool = buildTool<TaskInputType>({
         return { ok: false, error: '父级已中断', isError: true }
       }
 
+      // 深度比对第 16 轮: 子 agent 结果大小限制（防大结果污染主上下文）
+      const MAX_SUB_RESULT = 10000
+      let finalResult = subResult.trim() || '（子 agent 未产出文本）'
+      if (finalResult.length > MAX_SUB_RESULT) {
+        finalResult = finalResult.slice(0, MAX_SUB_RESULT) + '\n\n[子 agent 结果被截断——原长度 ' + finalResult.length + ' 字符]'
+      }
+
       return {
         ok: true,
-        data: subResult.trim() || '（子 agent 未产出文本）',
+        data: finalResult,
       }
     } catch (e) {
       return { ok: false, error: `子 agent 执行失败: ${String(e)}`, isError: true }
     } finally {
       clearTimeout(timeout)
+      // 深度比对第 16 轮: 清理 abort 监听器（防内存泄漏）
+      ctx.abortSignal.removeEventListener('abort', abortHandler)
     }
   },
 })

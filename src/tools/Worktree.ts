@@ -90,7 +90,7 @@ export const EnterWorktreeTool = buildTool<EnterWorktreeInputType>({
 export const ExitWorktreeTool = buildTool<void>({
   name: 'ExitWorktree',
   description: '退出 worktree，回到主工作目录',
-  prompt: `退出当前 worktree，提示回到主工作目录的路径。
+  prompt: `退出当前 worktree，回到主工作目录。
 
 配合 EnterWorktree 使用。注意：worktree 不会被删除（用 git worktree remove 手动清理）。`,
   inputSchema: { parse: (x: unknown) => x, safeParse: () => ({ success: true, data: undefined }) } as never,

@@ -11,7 +11,7 @@ export const BANNER = `  ███████╗ ██╗   ██╗  ██�
   ██║      ╚██████╔╝ ╚██████╗  ██║  ██╗ ╚██████╗  ╚██████╔╝ ╚██████╔╝ ███████╗
   ╚═╝       ╚═════╝   ╚═════╝  ╚═╝  ╚═╝  ╚═════╝   ╚═════╝   ╚═════╝  ╚══════╝`
 
-export const TAGLINE = '就他妈写代码，别废话。'
+export const TAGLINE = '就他妈写代码，别废话。操，又来。'
 
 // === 工具标签（纯 ASCII 方括号，不用 emoji）===
 const TOOL_TAGS: Record<string, string> = {

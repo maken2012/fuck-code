@@ -5,9 +5,12 @@
 import { buildTool } from '@/tools/Tool.js'
 import { z } from 'zod'
 
+// 深度比对第 33 轮: 加 recommended + preview 字段（对标 Claude Code AskUserQuestionTool）
 const AskOption = z.object({
   label: z.string().describe('选项显示文本（简短）'),
   description: z.string().optional().describe('选项说明（详细）'),
+  recommended: z.boolean().optional().describe('标记为推荐选项（UI 显示 "(推荐)"）'),
+  preview: z.string().optional().describe('选项预览内容（ASCII/代码片段，供用户对比）'),
 })
 type AskOptionType = z.infer<typeof AskOption>
 
@@ -79,7 +82,12 @@ export const AskUserQuestionTool = buildTool<AskQuestionType>({
         maxItems: 4,
         items: {
           type: 'object',
-          properties: { label: { type: 'string' }, description: { type: 'string' } },
+          properties: {
+            label: { type: 'string' },
+            description: { type: 'string' },
+            recommended: { type: 'boolean', description: '标记为推荐选项' },
+            preview: { type: 'string', description: '选项预览（ASCII/代码片段）' },
+          },
           required: ['label'],
         },
       },
@@ -100,11 +108,17 @@ export const AskUserQuestionTool = buildTool<AskQuestionType>({
         resolve,
       })
     })
+    // 深度比对第 33 轮: 结果含推荐标记信息
+    const selectedLabels = answers.map((a) => {
+      const opt = input.options.find((o) => o.label === a)
+      const isRecommended = opt?.recommended ? ' (推荐)' : ''
+      return `${a}${isRecommended}`
+    })
     return {
       ok: true,
       data: answers.length === 0
         ? '用户未选择（跳过）'
-        : `用户选择了：${answers.join('、')}`,
+        : `用户选择了：${selectedLabels.join('、')}`,
     }
   },
 })

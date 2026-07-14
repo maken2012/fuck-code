@@ -161,6 +161,8 @@ export const BashTool = buildTool<BashInputType>({
       const isGitDiff = /^(git|diff)\b/.test(cmd)
       const isGrep = /^(grep|rg|ag)\b/.test(firstWord)
       const isTest = /\.(test|spec)\.|(test|vitest|jest)\b/.test(cmd)
+      // 深度比对第 67 轮: 搜索/读取命令识别（对标 Claude Code isSearchOrReadBashCommand）
+      const isSearchOrRead = /^(ls|cat|head|tail|wc|find|file|which|echo|rg|grep|ag|fd)\b/.test(firstWord)
 
       if (isGitDiff && outcome.exitCode === 1) {
         // git diff 有差异 exit 1 = 正常（有 diff 输出）
@@ -184,7 +186,7 @@ export const BashTool = buildTool<BashInputType>({
         isError: true,
       }
     }
-    // 深度比对第 64 轮: cwd 重置检测（对标 Claude Code '命令把 cwd 改到项目外时提示'）
+    // 深度比对第 67 轮: 搜索/读取命令语义识别——成功无输出时显示更友好的结果
     const data = outcomeToData(outcome)
     const cwdAfter = findCwdChange(data.stdout)
     if (cwdAfter && cwdAfter !== ctx.cwd && !cwdAfter.startsWith(ctx.cwd)) {

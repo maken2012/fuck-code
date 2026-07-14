@@ -8,7 +8,7 @@
 // 流程：
 // 1. Edit/Write 执行前调 checkpoint(filePath) 备份
 // 2. /rewind 命令列出可回滚的文件，用户选择后恢复
-import { copyFile, stat, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, stat, mkdir, readFile, writeFile, rename } from 'node:fs/promises'
 import { resolve, basename } from 'node:path'
 import { createHash } from 'node:crypto'
 
@@ -35,10 +35,14 @@ async function loadIndex(cwd: string): Promise<Checkpoint[]> {
 }
 
 // 保存索引
+// 深度比对第 26 轮: 原子写索引（对标 Session.ts writeIndex 原子策略）
 async function saveIndex(cwd: string, checkpoints: Checkpoint[]): Promise<void> {
   const dir = resolve(cwd, CHECKPOINT_DIR)
   await mkdir(dir, { recursive: true })
-  await writeFile(resolve(dir, INDEX_FILE), JSON.stringify(checkpoints, null, 2), 'utf8')
+  const finalPath = resolve(dir, INDEX_FILE)
+  const tmpPath = finalPath + '.tmp'
+  await writeFile(tmpPath, JSON.stringify(checkpoints, null, 2), 'utf8')
+  await rename(tmpPath, finalPath)
 }
 
 // 备份文件（Edit/Write 执行前调）
@@ -70,18 +74,36 @@ export async function checkpoint(cwd: string, filePath: string): Promise<Checkpo
     size: (await stat(checkpointPath)).size,
   }
 
-  // 更新索引（保留最近 100 个）
+  // 深度比对第 26 轮: 同文件去重——每个文件只保留最近 5 个 checkpoint（对标 Claude Code pruning）
+  const MAX_PER_FILE = 5
   const index = await loadIndex(cwd)
   index.push(checkpoint)
-  if (index.length > 100) {
-    // 删除最旧的
-    const removed = index.shift()
-    if (removed) {
-      const { unlink } = await import('node:fs/promises')
-      await unlink(removed.checkpointPath).catch(() => {})
+
+  // 按文件分组，每组只保留最近 MAX_PER_FILE 个
+  const byFile = new Map<string, Checkpoint[]>()
+  for (const cp of index) {
+    const arr = byFile.get(cp.originalPath) ?? []
+    arr.push(cp)
+    byFile.set(cp.originalPath, arr)
+  }
+  const pruned: Checkpoint[] = []
+  const toDelete: string[] = []
+  for (const [, arr] of byFile) {
+    arr.sort((a, b) => b.timestamp - a.timestamp)
+    const keep = arr.slice(0, MAX_PER_FILE)
+    pruned.push(...keep)
+    for (const old of arr.slice(MAX_PER_FILE)) {
+      toDelete.push(old.checkpointPath)
     }
   }
-  await saveIndex(cwd, index)
+  // 全局上限仍保留 100 个
+  pruned.sort((a, b) => b.timestamp - a.timestamp)
+  const finalIndex = pruned.slice(0, 100)
+  // 删除被裁剪的文件
+  const { unlink } = await import('node:fs/promises')
+  await Promise.allSettled(toDelete.map((p) => unlink(p).catch(() => {})))
+
+  await saveIndex(cwd, finalIndex)
 
   return checkpoint
 }

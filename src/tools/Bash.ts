@@ -30,12 +30,13 @@ export interface BashResultData {
   truncated: boolean
   lineCount: number
   durationMs: number
+  outputFile?: string
 }
 
 // 运行结果（runChild 收集用）：区分正常结束 / 超时 / spawn 失败
 type RunOutcome =
-  | { kind: 'done'; exitCode: number | null; stdout: string; stderr: string; truncated: boolean; lineCount: number; durationMs: number }
-  | { kind: 'timeout' }
+  | { kind: 'done'; exitCode: number | null; stdout: string; stderr: string; truncated: boolean; lineCount: number; durationMs: number; outputFile?: string }
+  | { kind: 'timeout'; stdout: string; stderr: string; lineCount: number; durationMs: number; outputFile?: string }
   | { kind: 'spawn_error'; message: string }
 
 export const BashTool = buildTool<BashInputType>({
@@ -99,9 +100,17 @@ export const BashTool = buildTool<BashInputType>({
       return { ok: false, error: `Bash 执行失败: ${outcome.message}`, isError: true }
     }
     if (outcome.kind === 'timeout') {
+      // 深度比对修复 #2：超时返回部分输出而非全丢
+      const dur = `${(outcome.durationMs / 1000).toFixed(1)}s`
+      const partial = outcome.stdout
+        ? `\n\n部分输出（${outcome.lineCount} 行，${dur}）:\n${outcome.stdout.slice(0, 5000)}`
+        : '\n\n（超时前无输出）'
+      const fileHint = outcome.outputFile
+        ? `\n\n完整输出已保存: ${outcome.outputFile}（可用 Read 工具读取）`
+        : ''
       return {
         ok: false,
-        error: `命令超时（${timeout}ms）被终止: ${command}`,
+        error: `命令超时（${dur}）被终止: ${command}${partial}${fileHint}`,
         isError: true,
       }
     }
@@ -147,7 +156,8 @@ export const BashTool = buildTool<BashInputType>({
     if (d.stdout) result += `\nstdout:\n${d.stdout}`
     if (d.stderr) result += `\nstderr:\n${d.stderr}`
     if (d.truncated) {
-      result += `\n\n[输出被截断——stdout/stderr 各保留 ${MAX_OUTPUT_CHARS} 字符。用更精确的命令或管道过滤减少输出。]`
+      result += `\n\n[输出被截断——stdout/stderr 各保留 ${MAX_OUTPUT_CHARS} 字符。]`
+      if (d.outputFile) result += `\n完整输出已保存: ${d.outputFile}（可用 Read 读取）`
     }
     if (!d.stdout && !d.stderr && d.exitCode === 0) {
       result = `[ OK ] 命令执行成功（${dur}，无输出）`
@@ -167,6 +177,23 @@ function runChild(child: ChildProcess, timeout: number): Promise<RunOutcome> {
     let timedOut = false
     let settled = false
     let lineCount = 0
+
+    // 深度比对修复 #3：超时/截断时把完整输出落盘，让模型可二次读取
+    const persistOutput = async (out: string, err: string): Promise<string | undefined> => {
+      if (!out && !err) return undefined
+      try {
+        const { writeFile, mkdir } = await import('node:fs/promises')
+        const { join } = await import('node:path')
+        const { tmpdir } = await import('node:os')
+        const dir = join(tmpdir(), 'fuckcode-bash-output')
+        await mkdir(dir, { recursive: true })
+        const file = join(dir, `output-${Date.now()}-${child.pid ?? 0}.txt`)
+        await writeFile(file, `stdout:\n${out}\n\nstderr:\n${err}`, 'utf8')
+        return file
+      } catch {
+        return undefined
+      }
+    }
 
     const settle = (o: RunOutcome) => {
       if (settled) return
@@ -200,15 +227,16 @@ function runChild(child: ChildProcess, timeout: number): Promise<RunOutcome> {
 
     const timer = setTimeout(() => {
       timedOut = true
-      // kill 整个进程组（detached 时 child.pid = pgid）
+      // 深度比对修复 #2：超时用 SIGTERM 优雅退出（而非 SIGKILL 全杀）
+      // 进程有机会 flush 剩余输出，已收集的部分不丢
       try {
-        if (child.pid) process.kill(-child.pid, 'SIGKILL')
+        child.kill('SIGTERM')
+        // 3 秒后如果还活着才 SIGKILL
+        setTimeout(() => {
+          try { if (child.pid) process.kill(-child.pid, 'SIGKILL') } catch { /* 已退出 */ }
+        }, 3000)
       } catch {
-        try {
-          child.kill('SIGKILL')
-        } catch {
-          /* 进程可能已退出 */
-        }
+        /* 进程可能已退出 */
       }
     }, timeout)
 
@@ -217,11 +245,20 @@ function runChild(child: ChildProcess, timeout: number): Promise<RunOutcome> {
       settle({ kind: 'spawn_error', message: e.message })
     })
 
-    child.on('close', (code) => {
+    child.on('close', async (code) => {
       if (timedOut) {
-        settle({ kind: 'timeout' })
+        const outputFile = await persistOutput(stdout, stderr)
+        settle({
+          kind: 'timeout',
+          stdout,
+          stderr,
+          lineCount,
+          durationMs: Date.now() - startTime,
+          outputFile,
+        })
         return
       }
+      const outputFile = (stdoutTruncated || stderrTruncated) ? await persistOutput(stdout, stderr) : undefined
       settle({
         kind: 'done',
         exitCode: code,
@@ -230,6 +267,7 @@ function runChild(child: ChildProcess, timeout: number): Promise<RunOutcome> {
         truncated: stdoutTruncated || stderrTruncated,
         lineCount,
         durationMs: Date.now() - startTime,
+        outputFile,
       })
     })
   })
@@ -243,5 +281,6 @@ function outcomeToData(o: Extract<RunOutcome, { kind: 'done' }>): BashResultData
     truncated: o.truncated,
     lineCount: o.lineCount,
     durationMs: o.durationMs,
+    outputFile: o.outputFile,
   }
 }

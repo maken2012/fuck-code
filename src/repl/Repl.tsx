@@ -1083,6 +1083,21 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       (args) => { void handleSkillsCommand(args ? `/skills ${args}` : '/skills') },
       { requiresRunning: false },
     )
+    // 深度比对第 34 轮: /reload-skills 热重载（对标 Claude Code /reload-skills）
+    reg.register(
+      { cmd: '/reload-skills', desc: '重新扫描 skill/AGENTS.md 文件', example: '/reload-skills' },
+      async () => {
+        const { reloadCustomizations } = await import('@/agent/systemPrompt.js')
+        reloadCustomizations()
+        setHistory((h) => [...h, {
+          role: 'assistant' as const,
+          text: `[ OK ] 已重新加载 skill + AGENTS.md（下次对话生效）`,
+        }])
+        setInput('')
+        setCursorOffset(0)
+      },
+      { requiresRunning: false, aliases: ['/reload'] },
+    )
     reg.register(
       { cmd: '/less-perms', desc: '生成权限白名单', example: '/less-perms' },
       () => { void handleLessPermissionsCommand() },

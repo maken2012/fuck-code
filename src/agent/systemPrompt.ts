@@ -17,12 +17,21 @@ export interface BuildSystemPromptOpts {
 
 // 缓存已加载的指令（启动期加载一次，避免每次 queryLoop 都读文件）
 let cachedInstructions: string | null | undefined
+// 深度比对第 34 轮: skill 缓存（对标 Claude Code skill 热重载）
+let cachedSkills: import('@/instruction/skills.js').Skill[] | undefined
+
 async function getInstructions(): Promise<string | null> {
   if (process.env.FUCKCODE_SAFE_MODE === '1') return null // safe-mode 跳过 AGENTS.md
   if (cachedInstructions === undefined) {
     cachedInstructions = await loadInstructions(process.cwd()).catch(() => null)
   }
   return cachedInstructions
+}
+
+// 深度比对第 34 轮: reload 函数——清除缓存，下次 buildSystemPrompt 重新加载
+export function reloadCustomizations(): void {
+  cachedInstructions = undefined
+  cachedSkills = undefined
 }
 
 // 同步版：返回缓存值（首次可能为 undefined，queryLoop 首轮前应先 await preloadInstructions）
@@ -98,9 +107,11 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
         .join('\n\n')}`
     : ''
 
-  // v1.12: Skill 系统（按需加载的领域知识，只注入 name+description）
-  const allSkills = process.env.FUCKCODE_SAFE_MODE === '1' ? [] : await loadSkills(process.cwd()).catch(() => [])
-  const skillSection = formatSkillsForPrompt(allSkills)
+  // v1.12+深度比对第34轮: Skill 系统（缓存，reloadCustomizations 可清除）
+  if (cachedSkills === undefined) {
+    cachedSkills = process.env.FUCKCODE_SAFE_MODE === '1' ? [] : await loadSkills(process.cwd()).catch(() => [])
+  }
+  const skillSection = formatSkillsForPrompt(cachedSkills)
 
   // 动态段拼入 AGENTS.md + 记忆 + skill
   if (instructions) dynamicParts.push(`# 项目指令（AGENTS.md）\n${instructions}`)

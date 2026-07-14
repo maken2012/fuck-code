@@ -1084,8 +1084,10 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
     // 改为：只要不是 ctrl/meta 组合、且至少含一个非控制字符，就追加。
     if (!key.ctrl && !key.meta && inputChar) {
       // 过滤纯控制字符（如孤立的 \x1b Esc），但保留所有可见文本（含中文/emoji）
-      const hasVisible = /\S/.test(inputChar) && !/^\x1b+$/.test(inputChar)
-      if (hasVisible) {
+      // 允许可见字符 + 空格（空格之前被 \S 过滤掉了，导致 /plan 后没法输入需求）
+      // 仍排除纯控制字符（如孤立的 Esc）
+      const isValidChar = inputChar.trim().length > 0 && !/^\x1b+$/.test(inputChar)
+      if (isValidChar || inputChar === ' ') {
         setInput((s) => s + inputChar)
       }
     }

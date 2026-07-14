@@ -1,49 +1,88 @@
 // src/permissions/rules.ts
-// 权限规则解析 + 匹配。规则字符串格式：ToolName(content?)。
-//   'Bash(git *)'  → { tool: 'Bash', contentPattern: 'git *' }
-//   'Read'         → { tool: 'Read' }
+// 权限规则解析 + 匹配。
+// 深度比对第 27 轮: 支持 Tool(param:value) 参数级匹配（对标 Claude Code）
 //
-// matchesRule：工具名全等 +（如有 contentPattern）针对 input 的关键字段做通配符匹配。
-//   - Bash 匹配 input.command
-//   - Edit/Write 匹配 input.file_path
-// 通配符：含 '*' 时按 glob 转 regex（* → .*，其他字符按字面转义）；否则全等。
-// 不引入新依赖，自己写最小匹配。
+// 规则格式：
+//   'Bash(git *)'            → 匹配 Bash 的 command 内容
+//   'Edit(file_path:*.env)'  → 匹配 Edit 的 file_path 字段含 .env
+//   'Agent(model:opus)'      → 匹配 Agent 的 model 字段是 opus
+//   'Read'                   → 匹配所有 Read 调用
+//   '*'                      → 匹配所有工具（deny 用）
+//
+// 匹配逻辑：
+//   无参数：只看工具名（支持 * 通配）
+//   有参数名（param:value）：精确匹配 input 的指定字段
+//   有内容但无参数名：匹配 input 的关键字段（command/file_path/pattern）
 
 export interface PermissionRule {
-  tool: string
-  contentPattern?: string // 可选，含 * 通配符
+  tool: string                  // 工具名（支持 * 通配）
+  param?: string                // 参数级匹配的字段名（深度比对第 27 轮）
+  contentPattern?: string       // 内容匹配模式（含 * 通配符）
 }
 
-// 解析 'Bash(git *)' / 'Read' / 'Edit(src/**)' / 'Bash()'（空括号视为无 pattern）
+// 解析规则字符串
 export function parseRule(rule: string): PermissionRule {
   const trimmed = rule.trim()
+
+  // 纯通配符 '*'（匹配所有工具）
+  if (trimmed === '*') return { tool: '*' }
+
   const open = trimmed.indexOf('(')
   if (open === -1) {
     return { tool: trimmed }
   }
   const tool = trimmed.slice(0, open)
-  // 取最后一个 ')' 之前的部分作为 content（防止 content 里含 ')'）
   const lastClose = trimmed.lastIndexOf(')')
   const content = lastClose > open ? trimmed.slice(open + 1, lastClose) : trimmed.slice(open + 1)
   if (content === '') return { tool }
+
+  // 深度比对第 27 轮: 检测 Tool(param:value) 参数级语法
+  const colonIdx = content.indexOf(':')
+  if (colonIdx > 0) {
+    const param = content.slice(0, colonIdx).trim()
+    const value = content.slice(colonIdx + 1).trim()
+    // 确认 param 是合法字段名（字母+下划线，非通配符模式开头）
+    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(param)) {
+      return { tool, param, contentPattern: value }
+    }
+  }
+
   return { tool, contentPattern: content }
 }
 
-// tool 名匹配 +（如有 contentPattern）input 字段匹配
+// 匹配规则
 export function matchesRule(
   rule: PermissionRule,
   toolName: string,
   input: unknown,
 ): boolean {
-  if (rule.tool !== toolName) return false
-  if (rule.contentPattern === undefined) return true // 无 contentPattern 只看 tool 名
-  // 取 input 的内容字段
-  const fieldValue = extractContentField(rule.tool, input)
+  // 深度比对第 27 轮: 工具名支持 * 通配
+  if (rule.tool === '*') {
+    // * 匹配所有工具——但如果有 contentPattern 仍需检查
+  } else if (rule.tool !== toolName) {
+    return false
+  }
+
+  if (rule.contentPattern === undefined && rule.param === undefined) {
+    return true // 无条件匹配（只看工具名）
+  }
+
+  // 深度比对第 27 轮: 参数级匹配 Tool(param:value)
+  if (rule.param) {
+    if (typeof input !== 'object' || input === null) return false
+    const obj = input as Record<string, unknown>
+    const fieldValue = obj[rule.param]
+    if (typeof fieldValue !== 'string') return false
+    return wildcardMatch(rule.contentPattern ?? '*', fieldValue)
+  }
+
+  // 内容匹配（原有逻辑）
+  const fieldValue = extractContentField(rule.tool === '*' ? toolName : rule.tool, input)
   if (fieldValue === undefined) return false
-  return wildcardMatch(rule.contentPattern, fieldValue)
+  return wildcardMatch(rule.contentPattern!, fieldValue)
 }
 
-// 按工具名取内容字段：Bash→command；Edit/Write→file_path；其他工具无内容字段（undefined）
+// 按工具名取默认内容字段
 function extractContentField(toolName: string, input: unknown): string | undefined {
   if (typeof input !== 'object' || input === null) return undefined
   const obj = input as Record<string, unknown>
@@ -55,16 +94,18 @@ function extractContentField(toolName: string, input: unknown): string | undefin
     const v = obj['file_path']
     return typeof v === 'string' ? v : undefined
   }
+  if (toolName === 'Grep' || toolName === 'Glob') {
+    const v = obj['pattern']
+    return typeof v === 'string' ? v : undefined
+  }
   return undefined
 }
 
-// 通配符匹配：含 '*' 时 * → .*（其他字符字面转义）；否则全等。
-// 支持的最小语义：单 * 匹配任意字符序列。'**' 与 '*' 等价（简化，不做路径感知）。
+// 通配符匹配
 export function wildcardMatch(pattern: string, value: string): boolean {
   if (!pattern.includes('*')) {
     return pattern === value
   }
-  // 转义 regex 特殊字符，再把转义后的 '*' 还原成 '.*'
   const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
   const re = new RegExp(`^${escaped}$`)
   return re.test(value)

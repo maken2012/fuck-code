@@ -45,9 +45,16 @@ async function readIndex(cwd: string): Promise<SessionMeta[]> {
   }
 }
 
-// 写 sessions.json（原子 writeFile）
+// 深度比对第 21 轮: 原子写 sessions.json（写 .tmp 再 rename，防崩溃丢索引）
+import { rename, unlink } from 'node:fs/promises'
 async function writeIndex(cwd: string, sessions: SessionMeta[]): Promise<void> {
-  await writeFile(indexPath(cwd), JSON.stringify(sessions, null, 2))
+  const finalPath = indexPath(cwd)
+  const tmpPath = finalPath + '.tmp'
+  await writeFile(tmpPath, JSON.stringify(sessions, null, 2))
+  // rename 是原子的（POSIX 保证）——要么旧文件、要么新文件，不会出现半写
+  await rename(tmpPath, finalPath)
+  // 清理可能的旧 .tmp 残留（防跨启动泄漏）
+  await unlink(tmpPath + '.old').catch(() => {})
 }
 
 // 判断一条 user 消息是否是 compact boundary（结构化 content + _meta.compactBoundary）
@@ -124,6 +131,7 @@ export async function appendMessages(
 }
 
 // 加载消息：读全部行，找最后一个 compact boundary，返回它（含）之后的消息
+// 深度比对第 21 轮: 增强损坏行容错——最后一行可能是半写（崩溃时）
 export async function loadMessages(
   sessionId: string,
   cwd: string,
@@ -135,13 +143,21 @@ export async function loadMessages(
     return [] // 文件不存在按空
   }
 
-  const lines = raw.split('\n').filter((l) => l.trim().length > 0)
+  const allLines = raw.split('\n').filter((l) => l.trim().length > 0)
   const messages: ChatMessage[] = []
-  for (const line of lines) {
+  let skippedCount = 0
+  for (let i = 0; i < allLines.length; i++) {
+    const line = allLines[i]!
     try {
       messages.push(JSON.parse(line) as ChatMessage)
     } catch {
-      // 跳过损坏行（容错）
+      skippedCount++
+      // 深度比对第 21 轮: 最后一行半写不警告（正常——可能正在追加）
+      // 中间行损坏才警告（数据损坏信号）
+      if (i < allLines.length - 1) {
+        // 中间行损坏——日志到 stderr
+        process.stderr.write(`[WARN] 会话 ${sessionId} 第 ${i + 1} 行 JSON 损坏，已跳过\n`)
+      }
     }
   }
 

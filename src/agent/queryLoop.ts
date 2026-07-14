@@ -34,6 +34,7 @@ import type { ToolUseRequest } from '@/agent/ToolExecutor.js'
 import { findTool, toolsToAnthropicFormat } from '@/tools/registry.js'
 import { checkPermission } from '@/permissions/decision.js'
 import { PermissionManager } from '@/permissions/PermissionManager.js'
+import { SessionManager } from '@/services/SessionManager.js'
 import type { PermissionMode } from '@/permissions/modes.js'
 import { loadHooks, triggerHooks } from '@/hooks/HookManager.js'
 import type { HooksFile } from '@/hooks/HookManager.js'
@@ -75,11 +76,24 @@ export interface SessionApi {
   ) => Promise<void>
 }
 
-// 默认 Session 实现：直接调 src/services/Session.ts 的导出。
+// refactor: 默认 Session 实现委托给 SessionManager 类（OOP）
+// SessionManager 有状态（持有 sessionId），这里包一层适配 SessionApi 无状态接口
 const defaultSessionApi: SessionApi = {
-  loadMessages,
-  appendMessages,
-  writeCompactBoundary,
+  loadMessages: (sessionId, cwd) => {
+    const sm = new SessionManager(cwd)
+    return sm.resume(sessionId)
+  },
+  appendMessages: async (sessionId, cwd, messages) => {
+    const sm = new SessionManager(cwd)
+    // resume 让 sm 持有 sessionId，然后 append
+    await sm.resume(sessionId)
+    await sm.append(messages)
+  },
+  writeCompactBoundary: async (sessionId, cwd, summary) => {
+    const sm = new SessionManager(cwd)
+    await sm.resume(sessionId)
+    await sm.writeBoundary(summary)
+  },
 }
 
 export interface QueryLoopOpts {

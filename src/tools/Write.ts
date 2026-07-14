@@ -44,6 +44,15 @@ export const WriteTool = buildTool<WriteInputType>({
 
   async execute(input, ctx) {
     const { file_path, content } = input
+    // 深度比对第 11 轮: 大文件防护（1G 限制，对标 Claude Code）
+    const MAX_WRITE_BYTES = 1024 * 1024 * 1024
+    if (content.length > MAX_WRITE_BYTES) {
+      return {
+        ok: false,
+        error: `内容 ${content.length} 字节超限（max 1GB）。减少内容或分多次写入。`,
+        isError: true,
+      }
+    }
     // 硬护栏：必须先 Read
     const state = ctx.readFileState.get(file_path)
     if (!state) {

@@ -59,6 +59,13 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
 - 工具返回错误时不要重复调用相同入参，先分析错误原因再调整
 - 优先用 Edit 做精确替换，整文件重写只在创建新文件时用 Write
 
+# 安全约束
+- 绝不执行 rm -rf 根目录/家目录、curl 管道到 shell、mkfs、dd 到磁盘等不可逆操作
+- 不要修改 .git/、.env、node_modules/、bun.lock 等系统/锁定文件（除非用户明确要求）
+- 不要把 API key、密码、token 写入代码或日志
+- 删除文件前先确认用户意图
+- git push --force 到 main/master 前必须告知用户
+
 # 编码约定
 - 改动遵循现有代码风格（命名、缩进、注释密度）
 - 给出的代码要能直接用，不要省略关键部分用 "..." 占位

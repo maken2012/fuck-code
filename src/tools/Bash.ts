@@ -73,6 +73,16 @@ export const BashTool = buildTool<BashInputType>({
     const timeout = input.timeout ?? DEFAULT_TIMEOUT
     const background = input.run_in_background === true
 
+    // 深度比对第 11 轮: 危险命令检测（对标 Claude Code catastrophic removal）
+    const dangerCheck = checkDangerousCommand(command)
+    if (dangerCheck) {
+      return {
+        ok: false,
+        error: `[REFUSED] 危险命令被拒绝: ${dangerCheck}\n如果确实需要执行，请在 config.json 的 permissions.deny 里移除对应规则，或用 --dangerously-skip-permissions 模式。`,
+        isError: true,
+      }
+    }
+
     let child: ChildProcess
     try {
       child = spawn(command, {
@@ -284,3 +294,45 @@ function outcomeToData(o: Extract<RunOutcome, { kind: 'done' }>): BashResultData
     outputFile: o.outputFile,
   }
 }
+
+// 深度比对第 11 轮: 危险命令检测（对标 Claude Code catastrophic removal）
+// 检测可能导致不可逆数据损失的命令模式
+function checkDangerousCommand(cmd: string): string | null {
+  const c = cmd.toLowerCase()
+
+  // rm -rf 根目录 / home
+  if (/rm\s+(-rf|--force)[^|;&]*\s+(\/|~|\/home|\$home|\.\.\/\.\.\/)/i.test(c)) {
+    return 'rm -rf 指向根目录或家目录（会导致不可逆删除）'
+  }
+  // rm -rf 带通配符到根
+  if (/rm\s+(-rf|--force)[^|;&]*\s*\*/i.test(c) && /(^|\s)\*($|\s)/.test(c)) {
+    return 'rm -rf 通配删除（可能误删大量文件）'
+  }
+  // curl/wget 管道到 sh/bash（远程代码执行）
+  if (/(curl|wget)[^|]*\|\s*(sh|bash|zsh|python|perl)/i.test(c)) {
+    return 'curl/wget 管道到 shell（远程代码执行风险）'
+  }
+  // chmod -R 777 大范围
+  if (/chmod\s+-r\s+777\s+\//i.test(c)) {
+    return 'chmod -R 777 根目录（破坏所有权限）'
+  }
+  // dd 到磁盘设备
+  if (/dd\s+.*of=\/dev\/(sd|nvme|disk|hd)/i.test(c)) {
+    return 'dd 写入磁盘设备（会擦除整个磁盘）'
+  }
+  // mkfs 格式化
+  if (/mkfs\.\w+\s+\/dev\//i.test(c)) {
+    return 'mkfs 格式化磁盘设备（会擦除所有数据）'
+  }
+  // git push --force 到 main/master
+  if (/git\s+push\s+.*--force\s+.*\b(main|master)\b/i.test(c)) {
+    return 'git push --force 到 main/master（会覆盖远程历史）'
+  }
+  // killall / pkill 范围过大
+  if (/^(killall|pkill)\s+(-9|-KILL)/i.test(c)) {
+    return 'killall -9 / pkill -9（会杀大量进程）'
+  }
+
+  return null
+}
+

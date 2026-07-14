@@ -144,6 +144,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
 
   // 启动时读一次 config + 创建 session（异步，失败用默认值）
   useEffect(() => {
+    // refactor: 初始化逻辑与 useReplEngine hook 一致（getConfig + createSession + loadPromptHistory）
+    // 未来 Repl 重写为纯渲染组件时可直接用 const engine = useReplEngine(initialModel)
     getConfig()
       .then((c) => {
         // CLI flag > config（initialModel 已经在 App.tsx 做过 CLI>config 合并，这里优先用它）

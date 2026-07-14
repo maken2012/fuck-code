@@ -58,27 +58,34 @@ export const WebSearchTool = buildTool<WebSearchInputType>({
       const html = await resp.text()
       // DuckDuckGo Lite 的结果在 <a class="result-link" href="...">标题</a>
       const results: { title: string; url: string; snippet: string }[] = []
+      const seenUrls = new Set<string>() // 深度比对第 42 轮: 结果去重
       const linkRegex = /<a[^>]*class="result-link"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g
       const snippetRegex = /<td[^>]*class="result-snippet"[^>]*>([\s\S]*?)<\/td>/g
       const links = [...html.matchAll(linkRegex)]
       const snippets = [...html.matchAll(snippetRegex)]
-      for (let i = 0; i < Math.min(links.length, maxResults); i++) {
+      for (let i = 0; i < Math.min(links.length, maxResults * 2); i++) {
         const linkMatch = links[i]
         if (!linkMatch) continue
         const title = (linkMatch[2] ?? '').replace(/<[^>]+>/g, '').trim()
         const linkUrl = (linkMatch[1] ?? '').replace(/&amp;/g, '&')
         const snippet = (snippets[i]?.[1] ?? '').replace(/<[^>]+>/g, '').trim()
-        if (title && linkUrl) {
-          results.push({ title, url: linkUrl, snippet })
-        }
+        if (!title || !linkUrl) continue
+        // 深度比对第 42 轮: URL 去重（DuckDuckGo 有时返回重复结果）
+        const urlKey = linkUrl.replace(/^https?:\/\//, '').replace(/\/$/, '').toLowerCase()
+        if (seenUrls.has(urlKey)) continue
+        seenUrls.add(urlKey)
+        results.push({ title, url: linkUrl, snippet })
+        if (results.length >= maxResults) break
       }
       if (results.length === 0) {
         return { ok: true, data: `搜索 "${input.query}" 无结果。可尝试换关键词或用 WebFetch 直接抓已知 URL。` }
       }
+      // 深度比对第 42 轮: 结构化输出 + Sources 段（对标 Claude WebSearchTool 要求）
       const formatted = results
         .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet.slice(0, 200)}`)
         .join('\n\n')
-      return { ok: true, data: `搜索 "${input.query}" 的结果：\n\n${formatted}` }
+      const sources = results.map((r, i) => `[${i + 1}] ${r.url}`).join('\n')
+      return { ok: true, data: `搜索 "${input.query}" 的结果：\n\n${formatted}\n\n---\nSources:\n${sources}` }
     } catch (e) {
       return { ok: false, error: `搜索失败（网络问题或被限流）: ${(e as Error).message}`, isError: true }
     }

@@ -162,6 +162,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const commandRegistryRef = useRef<CommandRegistry | null>(null)
   // 深度比对修复 #3: 流式渲染节流 timer
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 深度比对第 61 轮: Esc 双击防误触时间戳
+  const escPressRef = useRef(0)
   // 深度比对修复 #8: thinking/reasoning 状态
   const thinkingTextRef = useRef('')
   const thinkingShownRef = useRef(false)
@@ -1367,11 +1369,27 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       return
     }
     // UX: Esc 清空输入
+    // 深度比对第 61 轮: Esc 双击防误触（对标 Claude Code useDoublePress 300ms）
     if (inputChar === '\x1b' || key.escape) {
-      setInput('')
+      // 有输入时第一次 Esc 清空输入，第二次才退出
+      if (input.length > 0) {
+        setInput('')
         setCursorOffset(0)
-        setCursorOffset(0)
-      setCmdHintIndex(0)
+        setCmdHintIndex(0)
+        // 标记"Esc 已按一次"——350ms 内再按才退出
+        escPressRef.current = Date.now()
+        return
+      }
+      // 空输入——检查是否在 350ms 内连按
+      if (Date.now() - escPressRef.current < 350) {
+        exit()
+        return
+      }
+      // 第一次按——提示再按一次
+      escPressRef.current = Date.now()
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '(再按一次 Esc 退出)' }])
+      // 1 秒后清除提示标记
+      setTimeout(() => { escPressRef.current = 0 }, 1000)
       return
     }
     // UX: Ctrl+L 清屏（清空显示历史，保留对话上下文）

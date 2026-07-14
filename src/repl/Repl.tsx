@@ -67,6 +67,8 @@ const ALL_COMMANDS: { cmd: string; desc: string; args?: string; example?: string
   { cmd: '/resume', desc: '恢复某个历史会话继续聊', args: '<序号>', example: '/resume 1' },
   { cmd: '/clear', desc: '清空当前对话上下文（不删历史文件）', args: '', example: '/clear' },
   { cmd: '/help', desc: '显示完整帮助（命令 + 快捷键）', args: '', example: '/help' },
+  { cmd: '/snapshot', desc: '创建会话快照', args: '<标签>', example: '/snapshot 重构前' },
+  { cmd: '/export', desc: '导出会话为 markdown', args: '', example: '/export' },
   { cmd: '/exit', desc: '退出 fuckcode', args: '', example: '/exit' },
   { cmd: '/quit', desc: '退出 fuckcode', args: '', example: '/quit' },
 ]
@@ -1246,7 +1248,53 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       },
     )
 
-    commandRegistryRef.current = reg
+    // 深度比对第 55 轮: /snapshot + /export 命令（对标 opencode snapshot/revert + share）
+    reg.register(
+      { cmd: '/snapshot', desc: '创建当前会话快照', args: '<标签>', example: '/snapshot 重构前' },
+      async (args) => {
+        if (!sessionId) {
+          setHistory((h) => [...h, { role: 'assistant' as const, text: '[FAIL] 无活跃会话' }])
+          return
+        }
+        try {
+          const { createSnapshot } = await import('@/services/SessionSnapshot.js')
+          const snap = await createSnapshot(sessionId, process.cwd(), chatHistoryRef.current, args || '手动快照')
+          setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 快照已创建: ${snap.label} (${new Date(snap.createdAt).toLocaleString('zh-CN')})` }])
+        } catch (e) {
+          setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 快照失败: ${String(e)}` }])
+        }
+        setInput('')
+        setCursorOffset(0)
+      },
+      { requiresRunning: false },
+    )
+    reg.register(
+      { cmd: '/export', desc: '导出会话为 markdown', args: '', example: '/export' },
+      async () => {
+        if (!sessionId) {
+          setHistory((h) => [...h, { role: 'assistant' as const, text: '[FAIL] 无活跃会话' }])
+          return
+        }
+        try {
+          const { exportSessionMarkdown } = await import('@/services/SessionSnapshot.js')
+          const md = await exportSessionMarkdown(sessionId, process.cwd())
+          const { writeFile } = await import('node:fs/promises')
+          const { resolve: resolvePath } = await import('node:path')
+          const exportPath = resolvePath(process.cwd(), `.fuckcode/exports/${sessionId}-${Date.now()}.md`)
+          await writeFile(exportPath, md, 'utf8').catch(async () => {
+            const { mkdir } = await import('node:fs/promises')
+            await mkdir(resolvePath(exportPath, '..'), { recursive: true })
+            await writeFile(exportPath, md, 'utf8')
+          })
+          setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 会话已导出: ${exportPath}` }])
+        } catch (e) {
+          setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 导出失败: ${String(e)}` }])
+        }
+        setInput('')
+        setCursorOffset(0)
+      },
+      { requiresRunning: false },
+    )
   }
 
   useInput((inputChar, key) => {

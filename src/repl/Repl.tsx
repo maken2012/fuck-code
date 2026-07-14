@@ -21,6 +21,10 @@ import { attitudeFor, BANNER, TAGLINE, toolTag, STATUS, divider } from '@/person
 import { CommandRegistry } from '@/repl/CommandRegistry.js'
 import { MessageHistory } from '@/repl/MessageHistory.js'
 import type { DisplayMessage } from '@/repl/MessageHistory.js'
+import { MessageList } from '@/repl/components/MessageList.js'
+import { InputBox } from '@/repl/components/InputBox.js'
+import { StatusBar } from '@/repl/components/StatusBar.js'
+import { CommandHints } from '@/repl/components/CommandHints.js'
 import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
 import { loadSkills } from '@/instruction/skills.js'
 import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
@@ -1161,44 +1165,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         <Text color="yellow" italic>  {TAGLINE}  {attitudeFor('welcome')}</Text>
       </Box>
 
-      {/* 消息流：user 和 assistant 视觉分明 */}
-      {history.map((m, i) => {
-        if (m.role === 'user') {
-          // user 消息：> 前缀 + 绿色 + dim 背景（像 Claude Code）
-          return (
-            <Box key={i} marginTop={i === 0 ? 1 : 0}>
-              <Text color="green" bold>{'> '}</Text>
-              <Text color="green">{m.text}</Text>
-            </Box>
-          )
-        }
-        // assistant 消息：无前缀，白色/默认色
-        // 工具调用类消息（以 [TAG] 开头）用 dim 色
-        const isToolCall = /^\s*\[/.test(m.text)
-        const isSectionHeader = /^---|齐活了|目标算是/.test(m.text)
-        if (isToolCall) {
-          return (
-            <Box key={i} flexDirection="column" marginLeft={2}>
-              <Text dimColor>{m.text}</Text>
-            </Box>
-          )
-        }
-        if (isSectionHeader) {
-          return (
-            <Box key={i} marginTop={1}>
-              <Text color="yellow" bold>{m.text}</Text>
-            </Box>
-          )
-        }
-        return (
-          <Box key={i} flexDirection="column">
-            <Text color={m.text === '' && running ? 'blue' : 'white'}>
-              {m.text}
-              {m.text === '' && running ? <Text color="blue">▋</Text> : ''}
-            </Text>
-          </Box>
-        )
-      })}
+      {/* 消息流——委托给 MessageList 子组件 */}
+      <MessageList messages={history} running={running} />
 
       {/* 权限弹窗 */}
       {pendingPermission && (
@@ -1209,59 +1177,25 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         </Box>
       )}
 
-      {/* 输入框：独立区域，红色边框 */}
-      {!pendingPermission && (
-        <Box marginTop={1} borderStyle="single" borderColor={running ? 'gray' : 'red'} paddingX={1}>
-          <Text color={running ? 'gray' : 'yellow'} bold>{running ? '  .. ' : '> '}</Text>
-          <Text color={running ? 'gray' : 'white'}>{input}</Text>
-          {!running && <Text color="red">▋</Text>}
-        </Box>
-      )}
+      {/* 输入框——委托给 InputBox 子组件 */}
+      <InputBox input={input} running={running} visible={!pendingPermission} />
 
-      {/* 实时命令提示（输入框下方，输入 / 时显示全部匹配命令） */}
-      {!pendingPermission && !running && input.startsWith('/') && (() => {
-        const hints = matchCommands(input)
-        if (hints.length === 0) return null
-        // 选中项周围显示 3 条上下文（滚动效果），避免列表太长
-        const visibleCount = 6
-        let startIdx = Math.max(0, cmdHintIndex - 2)
-        const endIdx = Math.min(hints.length, startIdx + visibleCount)
-        if (endIdx - startIdx < visibleCount) startIdx = Math.max(0, endIdx - visibleCount)
-        const visible = hints.slice(startIdx, endIdx)
-        return (
-          <Box flexDirection="column" marginTop={0}>
-            {startIdx > 0 && <Text dimColor>  ... 上方还有 {startIdx} 条</Text>}
-            {visible.map((h) => {
-              const realIdx = startIdx + visible.indexOf(h)
-              const selected = realIdx === cmdHintIndex
-              return (
-                <Box key={h.cmd} flexDirection="column">
-                  <Text color={selected ? 'yellow' : 'gray'} bold={selected}>
-                    {selected ? '> ' : '  '}{h.cmd}{h.args ? ` ${h.args}` : ''}
-                    <Text dimColor>  —  {h.desc}</Text>
-                  </Text>
-                  {selected && h.example && (
-                    <Text dimColor italic>      例：{h.example}</Text>
-                  )}
-                </Box>
-              )
-            })}
-            {endIdx < hints.length && <Text dimColor>  ... 下方还有 {hints.length - endIdx} 条</Text>}
-            <Text dimColor>  ↑↓ 选中 · Tab 确认 · Esc 取消（共 {hints.length} 条）</Text>
-          </Box>
-        )
-      })()}
+      {/* 实时命令提示——委托给 CommandHints 子组件 */}
+      <CommandHints
+        hints={matchCommands(input).map((c) => ({ cmd: c.cmd, desc: c.desc, args: c.args, example: c.example }))}
+        selectedIndex={cmdHintIndex}
+        visible={!pendingPermission && !running && input.startsWith('/')}
+      />
 
-      {/* 底部状态栏 */}
-      <Box marginTop={0}>
-        <Text dimColor>
-          {pendingPermission
-            ? attitudeFor('permission')
-            : running
-              ? `${genAttitudeRef.current} [Ctrl+C 中断]`
-              : `${currentModel} · ${totalTokensRef.current.input + totalTokensRef.current.output} tok · ${idleAttitudeRef.current}`}
-        </Text>
-      </Box>
+      {/* 底部状态栏——委托给 StatusBar 子组件 */}
+      <StatusBar
+        running={running}
+        pendingPermission={!!pendingPermission}
+        model={currentModel}
+        totalTokens={totalTokensRef.current}
+        idleAttitude={idleAttitudeRef.current}
+        genAttitude={genAttitudeRef.current}
+      />
     </Box>
   )
 }

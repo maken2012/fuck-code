@@ -15,6 +15,7 @@ export interface StreamOpenAIOpts {
   messages: ChatMessage[]
   maxTokens?: number
   signal: AbortSignal
+  reasoningEffort?: string  // 深度比对第 72 轮: reasoning_effort（low/medium/high）
   apiKey?: string
   apiBaseUrl?: string
   tools?: object[]
@@ -67,6 +68,11 @@ export async function* streamOpenAICompatible(opts: StreamOpenAIOpts): AsyncGene
     max_tokens: opts.maxTokens ?? 8192,
     stream: true,
     stream_options: { include_usage: true },
+  }
+  // 深度比对第 72 轮: reasoning_effort 支持（对标 opencode/OpenAI o1/o3/DeepSeek-R1）
+  // 某些模型支持 reasoning_effort 参数控制推理深度
+  if (opts.reasoningEffort) {
+    body.reasoning_effort = opts.reasoningEffort
   }
   if (opts.tools && opts.tools.length > 0) {
     // OpenAI tools 格式与 Anthropic 略不同，v1.4 暂不深度支持（留后续）

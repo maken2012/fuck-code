@@ -13,6 +13,7 @@ const GrepInput = z.object({
   type: z.string().describe('按语言类型过滤（如 ts/js/py/go），比 glob 更高效').optional(),
   ignore_case: z.boolean().describe('忽略大小写').optional(),
   multiline: z.boolean().describe('多行匹配（跨行正则，对标 Claude Code -U --multiline-dotall）').optional(),
+  context: z.number().int().min(0).max(10).describe('上下文行数（匹配行前后各 N 行，对标 Claude Code -C）').optional(),
   output_mode: z.enum(['files_with_matches', 'content', 'count']).describe(
     '输出模式：files_with_matches=只返回文件名（默认，省 token）；content=返回匹配行；count=返回每文件匹配数'
   ).optional(),
@@ -68,6 +69,8 @@ export const GrepTool = buildTool<GrepInputType>({
       if (input.type) args.push('--type', input.type)
       // 深度比对第 66 轮: multiline 支持（对标 Claude Code GrepTool -U --multiline-dotall）
       if (input.multiline) { args.push('-U', '--multiline-dotall') }
+      // 深度比对第 68 轮: context 行（对标 Claude Code GrepTool -A/-B/-C context 参数）
+      if (input.context && input.context > 0) args.push('-C', String(input.context))
 
       // output_mode 对应 rg 参数
       if (outputMode === 'files_with_matches') args.push('-l')

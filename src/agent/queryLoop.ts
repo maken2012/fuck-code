@@ -28,6 +28,7 @@ import type { ChatMessage, ContentBlock, LlmEvent } from '@/llm/types.js'
 import type { QueryEvent, PermissionUserDecision } from '@/agent/types.js'
 import type { Tool } from '@/tools/Tool.js'
 import { streamMessage, streamMessageWithFallback } from '@/llm/provider.js'
+import { LLMClient } from '@/llm/LLMClient.js'
 import { ToolExecutor } from '@/agent/ToolExecutor.js'
 import type { ToolUseRequest } from '@/agent/ToolExecutor.js'
 import { findTool, toolsToAnthropicFormat } from '@/tools/registry.js'
@@ -205,10 +206,17 @@ export async function* queryLoop(
   // 注意：若触发了 autoCompact，新增队列要重置（compact 已落盘 boundary）。
   let pendingPersist: ChatMessage[] = [userMessage]
 
-  // 选 LLM stream 函数（测试用 override；生产用 streamMessageWithFallback 支持 fallback 模型链）
+  // refactor: LLMClient 封装 provider 路由 + fallback 链（OOP）
+  // 测试用 _llmOverride 钩子（保持向后兼容）
+  const llmClient = LLMClient.fromConfig({
+    apiKey: opts.apiKey,
+    apiBaseUrl: opts.apiBaseUrl,
+    provider: opts.provider,
+    fallbackModels: opts.fallbackModels,
+  })
   const streamFn =
     opts._llmOverride ??
-    (streamMessageWithFallback as unknown as (o: object) => AsyncGenerator<LlmEvent>)
+    ((o: object) => llmClient.stream(o as Parameters<typeof llmClient.stream>[0]))
 
   // M5：autoCompact 阈值（默认 200000 contextWindow）
   const contextWindow = opts.contextWindow ?? DEFAULT_CONTEXT_WINDOW

@@ -18,6 +18,7 @@ import { runWorkflow } from '@/agent/workflow.js'
 import type { WorkflowStage } from '@/agent/workflow.js'
 import { runGoal } from '@/agent/goalRunner.js'
 import { attitudeFor, BANNER, TAGLINE, toolTag, STATUS, divider } from '@/personality.js'
+import { CommandRegistry } from '@/repl/CommandRegistry.js'
 import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
 import { loadSkills } from '@/instruction/skills.js'
 import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
@@ -106,6 +107,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   // 状态栏暴躁文案——缓存避免每次按键重渲染都变（用 ref + 只在状态切换时换）
   const idleAttitudeRef = useRef(attitudeFor('idle'))
   const genAttitudeRef = useRef(attitudeFor('generating'))
+  // refactor: 命令注册中心（替代 17 个 if-else）
+  const commandRegistryRef = useRef<CommandRegistry | null>(null)
   const [configLoaded, setConfigLoaded] = useState(false)
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null)
@@ -874,6 +877,124 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
     return false
   }
 
+  // refactor: 初始化命令注册中心（首次渲染时注册所有命令）
+  // 替代 useInput 回车处理里的 17 个 if-else 分发
+  if (!commandRegistryRef.current) {
+    const reg = new CommandRegistry()
+
+    reg.register(
+      { cmd: '/exit', desc: '退出', example: '/exit' },
+      () => { exit() },
+      { aliases: ['/quit'] },
+    )
+    reg.register(
+      { cmd: '/clear', desc: '清空当前上下文', example: '/clear' },
+      () => {
+        chatHistoryRef.current = []
+        setHistory([])
+        setInput('')
+      },
+      { requiresRunning: false },
+    )
+    reg.register(
+      { cmd: '/cost', desc: '显示 token 用量', example: '/cost' },
+      () => {
+        const t = totalTokensRef.current
+        setHistory((h) => [...h, {
+          role: 'assistant' as const,
+          text: `本次会话用量：输入 ${t.input} / 输出 ${t.output} / 缓存读 ${t.cacheRead} tokens`,
+        }])
+        setInput('')
+      },
+    )
+    reg.register(
+      { cmd: '/model', desc: '查看或切换模型', args: '[模型名]', example: '/model gpt-4o' },
+      (args) => {
+        if (args) {
+          setCurrentModel(args)
+          if (configRef.current) configRef.current.model = args
+          setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 模型已切换为 ${args}（下次对话生效）` }])
+        } else {
+          setHistory((h) => [...h, {
+            role: 'assistant' as const,
+            text: `当前模型：${currentModel}\n\n切换：/model <模型名>\n常用：\n  claude-sonnet-4-5-20250929（默认）\n  claude-opus-4-1-20250805（强，贵）\n  claude-haiku-3-5（快，便宜）`,
+          }])
+        }
+        setInput('')
+      },
+    )
+    reg.register(
+      { cmd: '/rewind', desc: '回滚文件到 checkpoint', args: '[序号]', example: '/rewind 2' },
+      (args) => { void handleRewindCommand(args ? `/rewind ${args}` : '/rewind') },
+      { requiresRunning: false },
+    )
+    reg.register(
+      { cmd: '/diff', desc: '查看本次会话改动', example: '/diff' },
+      () => { void handleDiffCommand() },
+      { requiresRunning: false },
+    )
+    reg.register(
+      { cmd: '/context', desc: '分析 token 占用', example: '/context' },
+      () => { void handleContextCommand() },
+      { requiresRunning: false },
+    )
+    reg.register(
+      { cmd: '/skills', desc: '查看/创建 skill', args: '[create <名>]', example: '/skills create vue' },
+      (args) => { void handleSkillsCommand(args ? `/skills ${args}` : '/skills') },
+      { requiresRunning: false },
+    )
+    reg.register(
+      { cmd: '/less-perms', desc: '生成权限白名单', example: '/less-perms' },
+      () => { void handleLessPermissionsCommand() },
+      { requiresRunning: false, aliases: ['/less-permission-prompts'] },
+    )
+    reg.register(
+      { cmd: '/help', desc: '显示完整帮助', example: '/help' },
+      () => {
+        setHistory((h) => [...h, {
+          role: 'assistant' as const,
+          text: `可用命令（输入 / 后实时提示）：\n\n【工作流】\n  /workflow <需求>  四阶段工作流\n  /goal <目标>      目标驱动\n  /plan <需求>      只读计划\n\n【上下文】\n  /context /diff /rewind /cost\n\n【模型】\n  /model [名] /less-perms\n\n【项目】\n  /init /agents /sessions /resume /skills /clear\n\n  /exit 退出`,
+        }])
+        setInput('')
+      },
+      { aliases: ['/?'] },
+    )
+    reg.register(
+      { cmd: '/sessions', desc: '列出历史会话', example: '/sessions' },
+      () => { void handleSessionCommand('/sessions') },
+      { requiresRunning: false },
+    )
+    reg.register(
+      { cmd: '/resume', desc: '恢复历史会话', args: '<序号>', example: '/resume 1' },
+      (args) => { void handleSessionCommand(`/resume ${args}`) },
+      { requiresRunning: false },
+    )
+    reg.register(
+      { cmd: '/init', desc: '生成 AGENTS.md', example: '/init' },
+      () => { void handleInstructionCommand('/init') },
+      { requiresRunning: false },
+    )
+    reg.register(
+      { cmd: '/agents', desc: '显示 AGENTS.md', example: '/agents' },
+      () => { void handleInstructionCommand('/agents') },
+      { requiresRunning: false, aliases: ['/instructions'] },
+    )
+    reg.register(
+      { cmd: '/workflow', desc: '四阶段工作流', args: '<需求>', example: '/workflow 加登录' },
+      (args) => { if (args) void runWorkflowTask(args) },
+    )
+    reg.register(
+      { cmd: '/goal', desc: '目标驱动', args: '<目标>', example: '/goal 测试全过' },
+      (args) => { if (args) void runGoalTask(args) },
+    )
+    reg.register(
+      { cmd: '/plan', desc: '只读分析计划', args: '<需求>', example: '/plan 重构' },
+      (args) => { if (args) void runPlan(args) },
+    )
+
+    commandRegistryRef.current = reg
+  }
+
   useInput((inputChar, key) => {
     // 权限弹窗激活时接管输入：只接 y/n（大小写都行），其他键忽略。
     // 读 ref 而非 state（useInput 闭包持有的是首次注册时的 state，看不到后续更新）。
@@ -941,184 +1062,21 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       setCmdHintIndex(0)
       return
     }
-    // 回车提交
+    // 回车提交——用 CommandRegistry 分发（替代 17 个 if-else）
     if (key.return) {
       const text = input.trim()
-      if (text === '/exit' || text === '/quit') {
-        exit()
-        return
-      }
-      if (text === '/clear') {
-        chatHistoryRef.current = []
-        setHistory([])
-        setInput('')
-        return
-      }
-      // M6: /cost 显示 token 用量
-      if (text === '/cost') {
-        const t = totalTokensRef.current
-        setHistory((h) => [
-          ...h,
-          {
-            role: 'assistant' as const,
-            text: `本次会话用量：输入 ${t.input} / 输出 ${t.output} / 缓存读 ${t.cacheRead} tokens`,
-          },
-        ])
-        setInput('')
-        return
-      }
-      // M6+: /model 查看或切换模型（运行时生效，下次对话用新模型）
-      if (text === '/model') {
-        setHistory((h) => [
-          ...h,
-          {
-            role: 'assistant' as const,
-            text: `当前模型：${currentModel}\n\n切换：/model <模型名>\n常用：\n  claude-sonnet-4-5-20250929（默认，均衡）\n  claude-opus-4-1-20250805（强，贵）\n  claude-haiku-3-5（快，便宜）\n  或第三方兼容模型名`,
-          },
-        ])
-        setInput('')
-        return
-      }
-      if (text.startsWith('/model ')) {
-        const newModel = text.slice('/model '.length).trim()
-        if (newModel) {
-          setCurrentModel(newModel)
-          if (configRef.current) configRef.current.model = newModel
-          setHistory((h) => [
-            ...h,
-            { role: 'assistant' as const, text: `✓ 模型已切换为 ${newModel}（下次对话生效）` },
-          ])
-        }
-        setInput('')
-        return
-      }
-      // v1.6: /rewind 文件 checkpoint 回滚（Edit/Write 前自动备份）
-      if (text === '/rewind' || text.startsWith('/rewind ')) {
-        if (!running) {
-          setInput('')
-          void handleRewindCommand(text)
-        }
-        return
-      }
-      // v1.10: /diff 查看本会话改动
-      if (text === '/diff') {
-        if (!running) {
-          setInput('')
-          void handleDiffCommand()
-        }
-        return
-      }
-      // v1.11: /context 分析上下文 token 占用
-      if (text === '/context') {
-        if (!running) {
-          setInput('')
-          void handleContextCommand()
-        }
-        return
-      }
-      // v1.12: /skills 查看/创建 skill
-      if (text === '/skills' || text.startsWith('/skills ')) {
-        if (!running) {
-          setInput('')
-          void handleSkillsCommand(text)
-        }
-        return
-      }
-      // v1.12: /less-permission-prompts 生成 allowlist 建议
-      if (text === '/less-permission-prompts' || text === '/less-perms') {
-        if (!running) {
-          setInput('')
-          void handleLessPermissionsCommand()
-        }
-        return
-      }
-      // v1.11: /goal <条件> 目标驱动持续工作（跨轮次直到达成）
-      if (text.startsWith('/goal ')) {
-        const goal = text.slice('/goal '.length).trim()
-        if (goal && !running) {
-          setInput('')
-          void runGoalTask(goal)
-        }
-        return
-      }
-      // v1.0 核心差异化：/workflow <需求> 自动走"理解→实现→验证→回顾"四阶段
-      if (text.startsWith('/workflow ')) {
-        const requirement = text.slice('/workflow '.length).trim()
-        if (requirement && !running) {
-          setInput('')
-          void runWorkflowTask(requirement)
-        }
-        return
-      }
-      // v0.3: /init 生成 AGENTS.md 模板 / /agents 显示指令（异步命令）
-      if (text === '/init' || text === '/agents' || text === '/instructions') {
-        if (!running) {
-          setInput('')
-          void handleInstructionCommand(text)
-        }
-        return
-      }
-      // v0.2b: /plan <需求> 用 plan 模式分析需求产出实施计划（只读，不改文件）
-      if (text.startsWith('/plan ')) {
-        const requirement = text.slice('/plan '.length).trim()
-        if (requirement && !running) {
-          setInput('')
-          void runPlan(requirement)
-        }
-        return
-      }
-      // M6: /help 显示命令列表
-      if (text === '/help' || text === '/?') {
-        setHistory((h) => [
-          ...h,
-          {
-            role: 'assistant' as const,
-            text: `可用命令（输入 / 后按 Tab 补全）：
 
-【工作流】
-  /workflow <需求>  ★ 四阶段：理解→实现→验证→回顾
-  /goal <条件>      目标驱动：持续工作直到达成
-  /plan <需求>      只读分析，产出实施计划
-
-【上下文】
-  /context    分析 token 占用 + 优化建议
-  /diff       查看本会话改动（diff 格式）
-  /rewind [N] 回滚文件到 checkpoint
-  /cost       显示 token 用量
-
-【模型/权限】
-  /model [名]     查看或切换模型
-  /less-perms     生成 allowlist 减少弹窗
-
-【项目/会话】
-  /init           生成 AGENTS.md 模板
-  /agents         显示 AGENTS.md 指令
-  /sessions       列出历史会话
-  /resume <N>     恢复历史会话
-  /clear          清空当前上下文
-
-【快捷键】
-  Tab             补全斜杠命令
-  ↑↓              浏览输入历史
-  Esc             清空输入 / 退出补全
-  Ctrl+C          中断生成 / 退出
-  Ctrl+L          清屏
-
-  /exit /quit     退出`,
-          },
-        ])
-        setInput('')
-        return
+      // 1. 先尝试注册的命令
+      if (commandRegistryRef.current && text.startsWith('/')) {
+        const registry = commandRegistryRef.current
+        void registry.tryExecute(text, running).then((handled) => {
+          if (handled) setInput('')
+        })
+        // tryExecute 是异步的——先 return 阻止后续处理（tryExecute 内部已经调了 handler）
+        if (registry.match(text).length > 0) return
       }
-      // M5：/sessions 与 /resume N 是异步命令，用 void 包装避免阻塞 useInput
-      if (text === '/sessions' || text === '/resume' || text.startsWith('/resume ')) {
-        if (!running) {
-          setInput('')
-          void handleSessionCommand(text)
-        }
-        return
-      }
-      // v1.1: 自定义斜杠命令（.fuckcode/commands/*.md）——未知 /xxx 时查自定义命令
+
+      // 2. 自定义命令（.fuckcode/commands/*.md）
       if (text.startsWith('/') && !text.startsWith('/ ')) {
         const cmdName = text.slice(1).split(/\s+/)[0] ?? ''
         const cmdArgs = text.slice(1 + cmdName.length).trim()
@@ -1128,13 +1086,13 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
           return
         }
       }
+
+      // 3. 普通对话输入
       if (text && !running) {
-        // v1.2+v1.7: 存入输入历史（内存 + 跨会话持久化）
         const hist = inputHistoryRef.current
         if (hist[hist.length - 1] !== text) {
           hist.push(text)
           if (hist.length > 100) hist.shift()
-          // v1.7: 持久化到 ~/.fuckcode/history/<hash>.jsonl
           void appendPromptHistory(process.cwd(), text).catch(() => {})
         }
         historyIndexRef.current = -1

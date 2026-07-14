@@ -28,16 +28,23 @@ function htmlToText(html: string): string {
     .trim()
 }
 
-// SSRF 防护：拒绝内网地址
+// SSRF 防护：拒绝内网地址（深度比对第 19 轮增强）
 function isPrivateUrl(urlStr: string): boolean {
   try {
     const u = new URL(urlStr)
-    const host = u.hostname
-    // 拒绝 localhost / 内网 IP / 元数据地址
+    const host = u.hostname.toLowerCase()
+    // 非 http/https 协议拒绝（file://, ftp://, gopher:// 等）
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return true
+    // localhost / 内网 IPv4
     if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') return true
     if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true
-    if (host === '169.254.169.254' || host === 'metadata.google.internal') return true // 云元数据
-    if (host.endsWith('.local') || host.endsWith('.internal')) return true
+    // IPv6 本地地址
+    if (host === '::1' || host === '[::1]' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80')) return true
+    // 云元数据地址
+    if (host === '169.254.169.254' || host === 'metadata.google.internal' || host === 'metadata') return true
+    if (host === 'metadata.aws.internal' || host === '169.254.170.2') return true // AWS ECS
+    // 本地域名
+    if (host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.localhost')) return true
     return false
   } catch {
     return true

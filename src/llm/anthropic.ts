@@ -53,7 +53,7 @@ export interface RawStreamEvent {
     }
   }
   index?: number
-  // content_block：text / tool_use 都可能（M3）
+  // content_block：text / tool_use / thinking 都可能
   content_block?: {
     type?: string
     // tool_use 专属
@@ -61,10 +61,14 @@ export interface RawStreamEvent {
     name?: string
     // text 专属（content_block_start 里 SDK 会塞一遍 text，我们忽略）
     text?: string
+    // thinking 专属
+    thinking?: string
   }
   delta?:
     | { type?: string; text?: string; stop_reason?: string } // text_delta / message_delta
     | { type: 'input_json_delta'; partial_json: string } // tool_use input 碎片
+    | { type: 'thinking_delta'; thinking: string } // extended thinking 碎片（#8）
+    | { type: 'signature_delta'; signature: string } // thinking 签名
   usage?: { output_tokens?: number }
 }
 
@@ -178,6 +182,9 @@ export async function* streamAnthropic(
             const idx = part.index ?? 0
             const tb = toolBlocks.get(idx)
             if (tb) tb.inputJson += part.delta.partial_json
+          } else if (part.delta.type === 'thinking_delta' && 'thinking' in part.delta) {
+            // 深度比对修复 #8: extended thinking 碎片
+            yield { type: 'thinking', textDelta: part.delta.thinking }
           } else if (part.delta.type === 'text_delta' && part.delta.text) {
             yield { type: 'text', textDelta: part.delta.text }
           }

@@ -125,6 +125,9 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const commandRegistryRef = useRef<CommandRegistry | null>(null)
   // 深度比对修复 #3: 流式渲染节流 timer
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 深度比对修复 #8: thinking/reasoning 状态
+  const thinkingTextRef = useRef('')
+  const thinkingShownRef = useRef(false)
   const [configLoaded, setConfigLoaded] = useState(false)
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null)
@@ -209,6 +212,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     setRunning(true)
 
     let assistantText = ''
+    thinkingTextRef.current = ''
+    thinkingShownRef.current = false
     // 立即新增 user + 空 assistant 两条消息
     setHistory((h) => [
       ...h,
@@ -254,6 +259,34 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
               }, 32) // ~30fps 足够流畅
             }
             break
+          case 'thinking_delta': {
+            // 深度比对修复 #8: thinking/reasoning 折叠显示
+            thinkingTextRef.current += event.text
+            // 更新 thinking 行（只在有 thinking 内容时显示）
+            if (!thinkingShownRef.current) {
+              thinkingShownRef.current = true
+              setHistory((h) => [...h, { role: 'assistant' as const, text: '(thinking...)' }])
+            }
+            // 节流更新（同 text_delta）
+            if (!flushTimerRef.current) {
+              flushTimerRef.current = setTimeout(() => {
+                flushTimerRef.current = null
+                const snapshot = thinkingTextRef.current
+                setHistory((h) => {
+                  const copy = [...h]
+                  // 找最后的 thinking 行更新
+                  for (let j = copy.length - 1; j >= 0; j--) {
+                    if (copy[j]?.text.startsWith('(thinking')) {
+                      copy[j] = { role: 'assistant' as const, text: `(thinking) ${snapshot.slice(-200)}...` }
+                      break
+                    }
+                  }
+                  return copy
+                })
+              }, 200) // thinking 更新慢一些（200ms 够了）
+            }
+            break
+          }
           case 'tool_use_start': {
             // 渲染"📖 调用 {tool}"提示（input 截断到 80 字符避免刷屏）
             const inputStr = JSON.stringify(event.input) ?? ''

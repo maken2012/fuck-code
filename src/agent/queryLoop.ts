@@ -285,6 +285,10 @@ export async function* queryLoop(
             assistantText += event.textDelta
             yield { type: 'text_delta', text: event.textDelta }
             break
+          case 'thinking':
+            // 深度比对修复 #8: 转发 thinking/reasoning 事件
+            yield { type: 'thinking_delta', text: event.textDelta }
+            break
           case 'tool_use':
             toolUses.push({
               id: event.toolUseId,

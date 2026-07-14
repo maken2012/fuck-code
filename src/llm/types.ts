@@ -27,6 +27,7 @@ export interface ChatMessage {
 // 流式事件：queryLoop 和 TUI 消费这些事件
 export type LlmEvent =
   | { type: 'text'; textDelta: string } // 文本片段
+  | { type: 'thinking'; textDelta: string } // thinking/reasoning 片段（深度比对 #8）
   | {
       type: 'tool_use' // M3 新增：模型要求调用工具
       toolName: string

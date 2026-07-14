@@ -103,6 +103,9 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const [running, setRunning] = useState(false)
   // UX: 实时命令提示（输入 / 后下方显示匹配命令，↑↓ 选中，Tab 确认）
   const [cmdHintIndex, setCmdHintIndex] = useState(0)
+  // 状态栏暴躁文案——缓存避免每次按键重渲染都变（用 ref + 只在状态切换时换）
+  const idleAttitudeRef = useRef(attitudeFor('idle'))
+  const genAttitudeRef = useRef(attitudeFor('generating'))
   const [configLoaded, setConfigLoaded] = useState(false)
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null)
@@ -162,6 +165,15 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
       .then((hist) => { inputHistoryRef.current = hist.slice().reverse() })
       .catch(() => {})
   }, [])
+
+  // 状态切换时刷新暴躁文案（不在渲染时调 attitudeFor 避免每次按键都变）
+  useEffect(() => {
+    if (running) {
+      genAttitudeRef.current = attitudeFor('generating')
+    } else {
+      idleAttitudeRef.current = attitudeFor('idle')
+    }
+  }, [running])
 
   async function runQuery(text: string) {
     const config = configRef.current ?? {
@@ -1242,14 +1254,22 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         </Box>
       )}
 
-      {/* 实时命令提示（输入框下方，输入 / 时显示匹配命令） */}
+      {/* 实时命令提示（输入框下方，输入 / 时显示全部匹配命令） */}
       {!pendingPermission && !running && input.startsWith('/') && (() => {
         const hints = matchCommands(input)
         if (hints.length === 0) return null
+        // 选中项周围显示 3 条上下文（滚动效果），避免列表太长
+        const visibleCount = 6
+        let startIdx = Math.max(0, cmdHintIndex - 2)
+        const endIdx = Math.min(hints.length, startIdx + visibleCount)
+        if (endIdx - startIdx < visibleCount) startIdx = Math.max(0, endIdx - visibleCount)
+        const visible = hints.slice(startIdx, endIdx)
         return (
           <Box flexDirection="column" marginTop={0}>
-            {hints.slice(0, 8).map((h, i) => {
-              const selected = i === cmdHintIndex
+            {startIdx > 0 && <Text dimColor>  ... 上方还有 {startIdx} 条</Text>}
+            {visible.map((h) => {
+              const realIdx = startIdx + visible.indexOf(h)
+              const selected = realIdx === cmdHintIndex
               return (
                 <Box key={h.cmd} flexDirection="column">
                   <Text color={selected ? 'yellow' : 'gray'} bold={selected}>
@@ -1262,7 +1282,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
                 </Box>
               )
             })}
-            <Text dimColor>  ↑↓ 选中 · Tab 确认 · Esc 取消</Text>
+            {endIdx < hints.length && <Text dimColor>  ... 下方还有 {hints.length - endIdx} 条</Text>}
+            <Text dimColor>  ↑↓ 选中 · Tab 确认 · Esc 取消（共 {hints.length} 条）</Text>
           </Box>
         )
       })()}
@@ -1273,8 +1294,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
           {pendingPermission
             ? attitudeFor('permission')
             : running
-              ? `${attitudeFor('generating')} [Ctrl+C 中断]`
-              : `${currentModel} · ${totalTokensRef.current.input + totalTokensRef.current.output} tok · ${attitudeFor('idle')}`}
+              ? `${genAttitudeRef.current} [Ctrl+C 中断]`
+              : `${currentModel} · ${totalTokensRef.current.input + totalTokensRef.current.output} tok · ${idleAttitudeRef.current}`}
         </Text>
       </Box>
     </Box>

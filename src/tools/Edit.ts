@@ -77,33 +77,41 @@ export const EditTool = buildTool<EditInputType>({
 
       const content = await readFile(file_path, 'utf8')
 
-      // old_string 存在性
+      // old_string 存在性（含引号归一化兜底）
+      let actualOldString = old_string
       if (!content.includes(old_string)) {
-        return {
-          ok: false,
-          error: `old_string 在文件中不存在: ${JSON.stringify(old_string.slice(0, 60))}`,
-          isError: true,
-        }
-      }
-
-      // 唯一性：非 replace_all 时，old_string 必须唯一
-      if (!replaceAll) {
-        const occurrences = countOccurrences(content, old_string)
-        if (occurrences > 1) {
+        // 引号归一化：模型可能输出直引号 ' " 但文件里是弯引号 ' ' " "
+        const normalizedContent = normalizeQuotes(content)
+        const normalizedOld = normalizeQuotes(old_string)
+        if (normalizedContent.includes(normalizedOld)) {
+          // 找到匹配——提取文件里的真实字符串（保留原始排版）
+          const idx = normalizedContent.indexOf(normalizedOld)
+          actualOldString = content.slice(idx, idx + old_string.length)
+        } else {
           return {
             ok: false,
-            error: `old_string 在文件中出现 ${occurrences} 次（要求唯一）。如需全部替换请设 replace_all=true`,
+            error: `old_string 在文件中不存在: ${JSON.stringify(old_string.slice(0, 60))}`,
             isError: true,
           }
         }
       }
 
-      // 执行替换
-      // 用 split/join 而非 String.replace——replace 会把 old_string 当正则解析，
-      // 含 . * ( $ \ 时会错配。replaceAll 用函数替换元避免 $ 特殊语义。
+      // 唯一性：非 replace_all 时，actualOldString 必须唯一
+      if (!replaceAll) {
+        const occurrences = countOccurrences(content, actualOldString)
+        if (occurrences > 1) {
+          return {
+            ok: false,
+            error: `old_string 在文件中出现 ${occurrences} 次（要求唯一）。请提供更长的上下文或设 replace_all=true`,
+            isError: true,
+          }
+        }
+      }
+
+      // 执行替换（用 actualOldString——可能经引号归一化调整过）
       const newContent = replaceAll
-        ? content.split(old_string).join(new_string)
-        : content.replace(old_string, () => new_string)
+        ? content.split(actualOldString).join(new_string)
+        : content.replace(actualOldString, () => new_string)
 
       // v1.6: 写前 checkpoint 备份（失败不阻塞编辑，/rewind 可回滚）
       await checkpoint(ctx.cwd, file_path).catch(() => {})
@@ -120,7 +128,7 @@ export const EditTool = buildTool<EditInputType>({
         readAt: Date.now(),
       })
 
-      const replacedCount = replaceAll ? countOccurrences(content, old_string) : 1
+      const replacedCount = replaceAll ? countOccurrences(content, actualOldString) : 1
       return {
         ok: true,
         data: `已替换 ${file_path}（${replacedCount} 处）`,
@@ -135,4 +143,13 @@ export const EditTool = buildTool<EditInputType>({
 function countOccurrences(content: string, oldString: string): number {
   if (oldString === '') return 0
   return content.split(oldString).length - 1
+}
+
+// 引号归一化：弯引号 → 直引号（用于模糊匹配 old_string）
+// 模型（尤其非 Anthropic）常把文件里的 ' ' " " 输出成 ' "
+function normalizeQuotes(text: string): string {
+  return text
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")  // ' ' ‚ ‛ → '
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')   // " " „ ‟ → "
+    .replace(/\u00A0/g, ' ')                        // nbsp → space
 }

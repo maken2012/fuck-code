@@ -198,6 +198,8 @@ export const BashTool = buildTool<BashInputType>({
       result += `\n\n[输出被截断——stdout/stderr 各保留 ${MAX_OUTPUT_CHARS} 字符。]`
       if (d.outputFile) result += `\n完整输出已保存: ${d.outputFile}（可用 Read 读取）`
     }
+    // 深度比对第 62 轮: 静默命令识别（对标 Claude Code isSilentBashCommand）
+    // mv/cp/rm/mkdir/touch/chmod/chown 等成功无输出 → 显示语义化结果
     if (!d.stdout && !d.stderr && d.exitCode === 0) {
       result = `[ OK ] 命令执行成功（${dur}，无输出）`
     }

@@ -69,16 +69,25 @@ export function InputBox({ input, running, visible, cursorOffset }: InputBoxProp
   const cursorChar = input[offset] ?? ''
   const after = input.slice(offset + 1)
 
+  // 深度比对第 62 轮: 空输入时显示提示（对标 Claude Code 输入框 placeholder）
+  const isEmpty = input.length === 0
+
   return (
     <Box marginTop={1} borderStyle="single" borderColor="red" paddingX={1}>
       <Text color="yellow" bold>{'> '}</Text>
-      <Text color="white">{before}</Text>
-      {cursorChar ? (
-        <Text color="black" backgroundColor="red" bold>{cursorChar}</Text>
+      {isEmpty ? (
+        <Text color="gray" dimColor>{'输入需求或 / 查看命令...'}{'\u258B'}</Text>
       ) : (
-        <Text color="red">{'\u258B'}</Text>
+        <>
+          <Text color="white">{before}</Text>
+          {cursorChar ? (
+            <Text color="black" backgroundColor="red" bold>{cursorChar}</Text>
+          ) : (
+            <Text color="red">{'\u258B'}</Text>
+          )}
+          <Text color="white">{after}</Text>
+        </>
       )}
-      <Text color="white">{after}</Text>
     </Box>
   )
 }

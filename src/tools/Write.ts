@@ -27,10 +27,19 @@ export const WriteTool = buildTool<WriteInputType>({
 - file_path（必填）：文件绝对路径
 - content（必填）：完整的文件内容
 
-**硬护栏**：调用前必须先用 Read 读取过该文件（readFileState 有记录），否则拒绝执行。
-这是为了防止盲改没看过的文件。写完后会更新已读状态，方便后续 Edit。
+**使用规则**（深度比对第 73 轮增强）：
+- 已存在的文件必须先 Read（硬护栏，防止盲改）
+- 新文件可以直接 Write（不需要先 Read）
+- 会自动创建父目录（如 src/new/dir/file.ts）
+- 大文件（>1GB）会被拒绝
+- 写入后自动检查 TS 类型错误（如有 tsc）
 
-写入采用原子操作（写临时文件再 rename），避免半写状态。`,
+**何时用 Write vs Edit**：
+- Write：创建新文件、或文件需要大幅重构（>50% 内容变化）
+- Edit：小改动、局部修改（大多数情况用 Edit 更安全）
+- 每次只 Write 一个文件，不要一次写多个
+
+写入采用原子操作（写 .tmp 再 rename），避免半写状态。`,
   inputSchema: WriteInput,
   jsonSchema: {
     type: 'object',

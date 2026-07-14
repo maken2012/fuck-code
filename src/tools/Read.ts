@@ -159,9 +159,44 @@ export const ReadTool = buildTool<ReadInputType>({
     } catch (e) {
       const err = e as NodeJS.ErrnoException
       if (err.code === 'ENOENT') {
-        return { ok: false, error: `文件不存在: ${input.file_path}`, isError: true }
+        // 深度比对第 63 轮: did-you-mean 相似文件（对标 Claude Code findSimilarFile）
+        const suggestion = await findSimilarFile(input.file_path, ctx.cwd).catch(() => null)
+        const hint = suggestion ? `\n你是指 ${suggestion} 吗？` : ''
+        return { ok: false, error: `文件不存在: ${input.file_path}${hint}`, isError: true }
       }
       return { ok: false, error: `读取失败: ${err.message}`, isError: true }
     }
   },
 })
+
+// 深度比对第 63 轮: did-you-mean 相似文件查找（对标 Claude Code findSimilarFile）
+// 当文件不存在时，在同目录找同名不同扩展名的文件（如 foo.ts → foo.tsx）
+async function findSimilarFile(filePath: string, cwd: string): Promise<string | null> {
+  try {
+    const { basename, dirname, extname } = await import('node:path')
+    const { readdir } = await import('node:fs/promises')
+    const dir = dirname(filePath)
+    const name = basename(filePath)
+    const ext = extname(name)
+    const baseName = ext ? name.slice(0, -ext.length) : name
+
+    const files = await readdir(dir).catch(() => [])
+    // 找同基础名不同扩展名（foo.ts → foo.tsx / foo.js / foo.mts）
+    const candidates = files.filter((f) => {
+      const fExt = extname(f)
+      const fBase = fExt ? f.slice(0, -fExt.length) : f
+      return fBase === baseName && f !== name
+    })
+    if (candidates.length > 0) {
+      return `${dir}/${candidates[0]}`
+    }
+    // 找编辑距离最近的（简化：只看首字母+长度相近）
+    const close = files.find((f) => {
+      return f.length >= name.length - 2 && f.length <= name.length + 2 &&
+        f[0]?.toLowerCase() === name[0]?.toLowerCase()
+    })
+    return close ? `${dir}/${close}` : null
+  } catch {
+    return null
+  }
+}

@@ -39,6 +39,33 @@ import {
 } from '@/services/Session.js'
 import type { SessionMeta } from '@/services/Session.js'
 
+// 全部斜杠命令（含简述，用于实时提示）
+const ALL_COMMANDS: { cmd: string; desc: string }[] = [
+  { cmd: '/workflow', desc: '四阶段工作流（理解→实现→验证→回顾）' },
+  { cmd: '/goal', desc: '目标驱动：持续工作直到达成' },
+  { cmd: '/plan', desc: '只读分析，产出实施计划' },
+  { cmd: '/context', desc: '分析 token 占用 + 优化建议' },
+  { cmd: '/diff', desc: '查看本会话改动' },
+  { cmd: '/rewind', desc: '回滚文件到 checkpoint' },
+  { cmd: '/cost', desc: '显示 token 用量' },
+  { cmd: '/model', desc: '查看或切换模型' },
+  { cmd: '/less-perms', desc: '生成 allowlist 减少弹窗' },
+  { cmd: '/init', desc: '生成 AGENTS.md 模板' },
+  { cmd: '/agents', desc: '显示 AGENTS.md 指令' },
+  { cmd: '/sessions', desc: '列出历史会话' },
+  { cmd: '/resume', desc: '恢复历史会话' },
+  { cmd: '/clear', desc: '清空当前上下文' },
+  { cmd: '/help', desc: '显示帮助' },
+  { cmd: '/exit', desc: '退出' },
+  { cmd: '/quit', desc: '退出' },
+]
+
+// 实时过滤匹配的命令
+function matchCommands(input: string): { cmd: string; desc: string }[] {
+  if (!input.startsWith('/')) return []
+  return ALL_COMMANDS.filter((c) => c.cmd.startsWith(input))
+}
+
 export interface ReplProps {
   version?: string
   /** 初始模型（来自 config 或 CLI --model 覆盖） */
@@ -72,9 +99,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const historyIndexRef = useRef<number>(-1) // -1 表示当前输入，>=0 表示浏览历史第 N 项
   const [history, setHistory] = useState<DisplayMessage[]>([])
   const [running, setRunning] = useState(false)
-  // UX: Tab 补全状态（输入 / 后 Tab 显示命令列表）
-  const [tabCompletions, setTabCompletions] = useState<string[] | null>(null)
-  const [tabIndex, setTabIndex] = useState(0)
+  // UX: 实时命令提示（输入 / 后下方显示匹配命令，↑↓ 选中，Tab 确认）
+  const [cmdHintIndex, setCmdHintIndex] = useState(0)
   const [configLoaded, setConfigLoaded] = useState(false)
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null)
@@ -796,49 +822,37 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       exit()
       return
     }
-    // UX: Esc 清空输入（退出 Tab 补全模式）
+    // UX: Esc 清空输入
     if (inputChar === '\x1b' || key.escape) {
-      if (tabCompletions) {
-        setTabCompletions(null)
-        setTabIndex(0)
-      } else {
-        setInput('')
-      }
+      setInput('')
+      setCmdHintIndex(0)
       return
     }
     // UX: Ctrl+L 清屏（清空显示历史，保留对话上下文）
     if (key.ctrl && inputChar === 'l') {
       setHistory([])
-      setTabCompletions(null)
+      setCmdHintIndex(0)
       return
     }
-    // UX: Tab 补全（输入 / 开头时列出/切换命令）
-    if (key.tab && input.startsWith('/')) {
-      const allCommands = [
-        '/help', '/exit', '/quit', '/clear', '/cost', '/model', '/context',
-        '/workflow', '/goal', '/plan', '/diff', '/rewind', '/less-perms',
-        '/init', '/agents', '/sessions', '/resume', '/instructions',
-      ]
-      const matches = allCommands.filter((c) => c.startsWith(input))
-      if (matches.length === 0) {
-        setTabCompletions(null)
-      } else if (tabCompletions && tabCompletions.length > 0) {
-        // 已在补全模式：切换到下一个
-        const next = (tabIndex + 1) % tabCompletions.length
-        setTabIndex(next)
-        setInput(tabCompletions[next]!)
+
+    // 计算当前输入匹配的命令（实时）
+    const hints = matchCommands(input)
+
+    // UX: ↑↓ 在命令提示列表里选中
+    if (hints.length > 0 && (key.upArrow || key.downArrow)) {
+      if (key.upArrow) {
+        setCmdHintIndex((i) => (i <= 0 ? hints.length - 1 : i - 1))
       } else {
-        // 首次 Tab：显示匹配列表，填入第一个
-        setTabCompletions(matches)
-        setTabIndex(0)
-        setInput(matches[0]!)
+        setCmdHintIndex((i) => (i >= hints.length - 1 ? 0 : i + 1))
       }
       return
     }
-    // 非 / 开头或非 tab：清除补全状态
-    if (tabCompletions) {
-      setTabCompletions(null)
-      setTabIndex(0)
+
+    // UX: Tab 确认选中命令（填入当前选中的那个）
+    if (key.tab && hints.length > 0) {
+      setInput(hints[cmdHintIndex]?.cmd ?? hints[0]!.cmd)
+      setCmdHintIndex(0)
+      return
     }
     // 回车提交
     if (key.return) {
@@ -1125,18 +1139,6 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         )
       })}
 
-      {/* Tab 补全列表 */}
-      {tabCompletions && tabCompletions.length > 0 && (
-        <Box marginTop={1} flexDirection="column">
-          <Text dimColor>── 补全（Tab 切换 · Esc 取消）──</Text>
-          {tabCompletions.map((cmd, i) => (
-            <Text key={cmd} color={i === tabIndex ? 'cyan' : 'gray'}>
-              {i === tabIndex ? '▶ ' : '  '}{cmd}
-            </Text>
-          ))}
-        </Box>
-      )}
-
       {/* 权限弹窗 */}
       {pendingPermission && (
         <Box marginTop={1} flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
@@ -1146,14 +1148,31 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         </Box>
       )}
 
-      {/* 输入框：独立区域，红色边框，暴躁主题 */}
+      {/* 输入框：独立区域，红色边框 */}
       {!pendingPermission && (
         <Box marginTop={1} borderStyle="single" borderColor={running ? 'gray' : 'red'} paddingX={1}>
-          <Text color={running ? 'gray' : 'yellow'} bold>{running ? '⏳ ' : '> '}</Text>
+          <Text color={running ? 'gray' : 'yellow'} bold>{running ? '  .. ' : '> '}</Text>
           <Text color={running ? 'gray' : 'white'}>{input}</Text>
           {!running && <Text color="red">▋</Text>}
         </Box>
       )}
+
+      {/* 实时命令提示（输入框下方，输入 / 时显示匹配命令） */}
+      {!pendingPermission && !running && input.startsWith('/') && (() => {
+        const hints = matchCommands(input)
+        if (hints.length === 0) return null
+        return (
+          <Box flexDirection="column" marginTop={0}>
+            {hints.slice(0, 8).map((h, i) => (
+              <Text key={h.cmd} color={i === cmdHintIndex ? 'yellow' : 'gray'} bold={i === cmdHintIndex}>
+                {i === cmdHintIndex ? '> ' : '  '}{h.cmd}
+                <Text dimColor>  {h.desc}</Text>
+              </Text>
+            ))}
+            <Text dimColor>  ↑↓ 选中 · Tab 确认 · Esc 取消</Text>
+          </Box>
+        )
+      })()}
 
       {/* 底部状态栏 */}
       <Box marginTop={0}>

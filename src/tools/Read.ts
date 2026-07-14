@@ -66,6 +66,19 @@ export const ReadTool = buildTool<ReadInputType>({
       const buf = await readFile(input.file_path)
       const content = buf.toString('utf8')
 
+      // 深度比对第 58 轮: 超大单行防护（对标 Claude Code 'extremely long single lines memory blowup'）
+      // minified JS / base64 / 压缩数据常是单行几十万字符——split('\n') + 行号渲染会爆内存
+      const MAX_LINE_LENGTH = 50000 // 单行最大 50K 字符
+      const firstNewline = content.indexOf('\n')
+      const firstLineLen = firstNewline === -1 ? content.length : firstNewline
+      if (firstLineLen > MAX_LINE_LENGTH) {
+        return {
+          ok: false,
+          error: `文件含超长单行（${firstLineLen} 字符，max ${MAX_LINE_LENGTH}）。可能是 minified/压缩/base64 文件，不支持文本读取。用 Grep 搜索关键内容。`,
+          isError: true,
+        }
+      }
+
       // 二进制检测：扫前 8192 字节，NUL 字节或非打印字符 >30% 判定二进制
       const sampleSize = Math.min(buf.length, 8192)
       let nonPrintable = 0

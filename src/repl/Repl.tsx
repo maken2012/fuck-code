@@ -57,8 +57,10 @@ const ALL_COMMANDS: { cmd: string; desc: string; args?: string; example?: string
   { cmd: '/rewind', desc: '回滚文件到 Edit/Write 前的备份', args: '[序号]', example: '/rewind 或 /rewind 2' },
   { cmd: '/cost', desc: '显示本次会话累计 token 用量', args: '', example: '/cost' },
   { cmd: '/model', desc: '查看当前模型 / 切换到别的模型', args: '[模型名]', example: '/model 或 /model gpt-4o' },
+  { cmd: '/config', desc: '查看或修改配置', args: '[key=value]', example: '/config model=gpt-4o' },
   { cmd: '/less-perms', desc: '分析常用操作，生成权限白名单减少弹窗', args: '', example: '/less-perms' },
   { cmd: '/skills', desc: '查看/创建 skill（领域知识包），如 /skills create vue-debug', args: '[create <名>]', example: '/skills 或 /skills create react-perf' },
+  { cmd: '/reload-skills', desc: '重新扫描 skill/AGENTS.md 文件', args: '', example: '/reload-skills' },
   { cmd: '/init', desc: '生成 AGENTS.md 模板（项目级行为约定）', args: '', example: '/init' },
   { cmd: '/agents', desc: '显示当前加载的 AGENTS.md 指令内容', args: '', example: '/agents' },
   { cmd: '/sessions', desc: '列出本项目的历史会话', args: '', example: '/sessions' },
@@ -69,10 +71,41 @@ const ALL_COMMANDS: { cmd: string; desc: string; args?: string; example?: string
   { cmd: '/quit', desc: '退出 fuckcode', args: '', example: '/quit' },
 ]
 
-// 实时过滤匹配的命令
-function matchCommands(input: string): typeof ALL_COMMANDS {
+// 深度比对第 50 轮: 自定义命令缓存——异步加载后合并到 ALL_COMMANDS
+let customCommandsCache: typeof ALL_COMMANDS = []
+let customCommandsLoaded = false
+
+async function ensureCustomCommandsLoaded(): Promise<void> {
+  if (customCommandsLoaded) return
+  customCommandsLoaded = true
+  try {
+    const { loadCustomCommands } = await import('@/instruction/customCommands.js')
+    const commands = await loadCustomCommands(process.cwd())
+    customCommandsCache = commands.map((c) => ({
+      cmd: `/${c.name}`,
+      desc: c.description ?? `自定义命令`,
+      args: c.hints,
+      example: c.hints ? `/${c.name} ${c.hints}` : `/${c.name}`,
+    }))
+  } catch {
+    // 加载失败不阻塞
+  }
+}
+
+// 实时过滤匹配的命令（含自定义命令）
+async function matchCommandsAsync(input: string): Promise<typeof ALL_COMMANDS> {
   if (!input.startsWith('/')) return []
-  return ALL_COMMANDS.filter((c) => c.cmd.startsWith(input))
+  await ensureCustomCommandsLoaded()
+  const all = [...ALL_COMMANDS, ...customCommandsCache]
+  return all.filter((c) => c.cmd.startsWith(input))
+}
+
+// 同步版（保持兼容，不含自定义命令）
+function matchCommands(input: string): typeof ALL_COMMANDS {
+  void ensureCustomCommandsLoaded()
+  if (!input.startsWith('/')) return []
+  const all = [...ALL_COMMANDS, ...customCommandsCache]
+  return all.filter((c) => c.cmd.startsWith(input))
 }
 
 export interface ReplProps {

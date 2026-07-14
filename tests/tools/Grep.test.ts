@@ -23,7 +23,7 @@ afterEach(async () => {
 })
 
 test('搜索到匹配行（带文件名 + 行号）', async () => {
-  const result = await GrepTool.execute({ pattern: 'hello' }, ctx)
+  const result = await GrepTool.execute({ pattern: 'hello', output_mode: 'content' }, ctx)
   expect(result.ok).toBe(true)
   if (result.ok) {
     const data = result.data as string
@@ -52,10 +52,9 @@ test('glob 过滤只搜指定类型', async () => {
 })
 
 test('ignore_case 忽略大小写', async () => {
-  // c.md 含大写 "Hello"，默认大小写敏感搜不到；开 ignore_case 能搜到
-  const sensitive = await GrepTool.execute({ pattern: 'hello', glob: '*.md' }, ctx)
+  const sensitive = await GrepTool.execute({ pattern: 'hello', glob: '*.md', output_mode: 'content' }, ctx)
   const insensitive = await GrepTool.execute(
-    { pattern: 'hello', glob: '*.md', ignore_case: true },
+    { pattern: 'hello', glob: '*.md', ignore_case: true, output_mode: 'content' },
     ctx,
   )
   expect(sensitive.ok).toBe(true)

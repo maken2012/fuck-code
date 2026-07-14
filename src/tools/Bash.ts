@@ -28,11 +28,13 @@ export interface BashResultData {
   stderr: string
   exitCode: number | null
   truncated: boolean
+  lineCount: number
+  durationMs: number
 }
 
 // 运行结果（runChild 收集用）：区分正常结束 / 超时 / spawn 失败
 type RunOutcome =
-  | { kind: 'done'; exitCode: number | null; stdout: string; stderr: string; truncated: boolean }
+  | { kind: 'done'; exitCode: number | null; stdout: string; stderr: string; truncated: boolean; lineCount: number; durationMs: number }
   | { kind: 'timeout' }
   | { kind: 'spawn_error'; message: string }
 
@@ -140,14 +142,15 @@ export const BashTool = buildTool<BashInputType>({
   // 深度比对修复 #8：截断时给模型明确标记（而非默默砍尾巴）
   formatResult(data: unknown): string {
     const d = data as BashResultData
-    let result = `退出码: ${d.exitCode}\n`
+    const dur = d.durationMs < 1000 ? `${d.durationMs}ms` : `${(d.durationMs / 1000).toFixed(1)}s`
+    let result = `退出码: ${d.exitCode} · 耗时: ${dur} · ${d.lineCount} 行输出\n`
     if (d.stdout) result += `\nstdout:\n${d.stdout}`
     if (d.stderr) result += `\nstderr:\n${d.stderr}`
     if (d.truncated) {
       result += `\n\n[输出被截断——stdout/stderr 各保留 ${MAX_OUTPUT_CHARS} 字符。用更精确的命令或管道过滤减少输出。]`
     }
     if (!d.stdout && !d.stderr && d.exitCode === 0) {
-      result = '[ OK ] 命令执行成功（无输出）'
+      result = `[ OK ] 命令执行成功（${dur}，无输出）`
     }
     return result
   },
@@ -155,6 +158,7 @@ export const BashTool = buildTool<BashInputType>({
 
 // 收集 stdout/stderr（边收边截断），超时 kill 进程组
 function runChild(child: ChildProcess, timeout: number): Promise<RunOutcome> {
+  const startTime = Date.now()
   return new Promise((resolve) => {
     let stdout = ''
     let stderr = ''
@@ -162,6 +166,7 @@ function runChild(child: ChildProcess, timeout: number): Promise<RunOutcome> {
     let stderrTruncated = false
     let timedOut = false
     let settled = false
+    let lineCount = 0
 
     const settle = (o: RunOutcome) => {
       if (settled) return
@@ -173,7 +178,9 @@ function runChild(child: ChildProcess, timeout: number): Promise<RunOutcome> {
     if (child.stdout) {
       child.stdout.on('data', (d: Buffer) => {
         if (stdoutTruncated) return
-        stdout += d.toString()
+        const chunk = d.toString()
+        stdout += chunk
+        lineCount += chunk.split('\n').length - 1
         if (stdout.length > MAX_OUTPUT_CHARS) {
           stdout = stdout.slice(0, MAX_OUTPUT_CHARS)
           stdoutTruncated = true
@@ -221,6 +228,8 @@ function runChild(child: ChildProcess, timeout: number): Promise<RunOutcome> {
         stdout,
         stderr,
         truncated: stdoutTruncated || stderrTruncated,
+        lineCount,
+        durationMs: Date.now() - startTime,
       })
     })
   })
@@ -232,5 +241,7 @@ function outcomeToData(o: Extract<RunOutcome, { kind: 'done' }>): BashResultData
     stderr: o.stderr,
     exitCode: o.exitCode,
     truncated: o.truncated,
+    lineCount: o.lineCount,
+    durationMs: o.durationMs,
   }
 }

@@ -1328,6 +1328,15 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       },
       { requiresRunning: false },
     )
+    // 深度比对第 69 轮: /version + /release-notes（对标 Claude Code /release-notes）
+    reg.register(
+      { cmd: '/version', desc: '显示版本号', args: '', example: '/version' },
+      () => {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `fuckcode v${VERSION}` }])
+        setInput('')
+        setCursorOffset(0)
+      },
+    )
   }
 
   useInput((inputChar, key) => {

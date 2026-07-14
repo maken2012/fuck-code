@@ -33,11 +33,21 @@ export const GrepTool = buildTool<GrepInputType>({
 - pattern（必填）：搜索词或正则表达式
 - path（可选）：搜索目录，默认 cwd
 - glob（可选）：文件过滤，如 "*.ts"
+- type（可选）：按语言类型过滤（如 ts/js/py/go），比 glob 更高效
 - ignore_case（可选）：忽略大小写
-- output_mode（可选）：files_with_matches=只返回文件名（默认，省 token）；content=返回匹配行（file:line:content）；count=返回每文件匹配数
-- head_limit（可选）：最大返回条数（默认 200）
+- multiline（可选）：多行匹配（跨行正则）
+- context（可选）：上下文行数（匹配行前后各 N 行）
+- output_mode（可选）：files_with_matches=只返回文件名（默认，省 token）；content=返回匹配行；count=返回每文件匹配数
+- head_limit（可选）：最大返回条数（默认 200，设 0 无限）
 
-默认只返回匹配的文件名列表（省 token）。需要看匹配内容时设 output_mode=content。`,
+特性（深度比对第 76 轮增强）：
+- pattern 以 - 开头时自动加 -e 保护
+- 自动排除 .git/.svn/.hg 等 VCS 目录
+- 超长行截断（max-columns 500，防 minified 刷屏）
+- 路径相对化（省 token）
+- files_with_matches 时返回文件名列表 + 数量
+- content 时返回 file:line:content 格式
+- 退出码 1 = 无匹配（正常），0 = 有匹配`,
   inputSchema: GrepInput,
   jsonSchema: {
     type: 'object',

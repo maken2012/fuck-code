@@ -1,68 +1,214 @@
-# fuckcode
+<div align="center">
 
-> 原生中文交互的终端 AI 编码工具。目标是从需求到开发测试的完整流程都能在一个工具里完成。
+```
+  ███████╗ ██╗   ██╗  ██████╗  ██╗  ██╗  ██████╗   ██████╗  ██████╗  ███████╗
+  ██╔════╝ ██║   ██║ ██╔════╝  ██║ ██╔╝ ██╔════╝  ██╔═══██╗ ██╔═══██╗ ██╔════╝
+  █████╗   ██║   ██║ ██║       █████╔╝  ██║       ██║   ██║ ██║   ██║ █████╗
+  ██╔══╝   ██║   ██║ ██║       ██╔═██╗  ██║       ██║   ██║ ██║   ██║ ██╔════╝
+  ██║      ╚██████╔╝ ╚██████╗  ██║  ██╗ ╚██████╗  ╚██████╔╝ ╚██████╔╝ ███████╗
+  ╚═╝       ╚═════╝   ╚═════╝  ╚═╝  ╚═╝  ╚═════╝   ╚═════╝   ╚═════╝  ╚══════╝
+```
 
-**当前状态：v1.12（252 tests）** — Skill 系统 + 自动记忆 + allowlist 生成。15 工具，19 命令。原生中文编码 agent。
+**就他妈写代码，别废话。**
+
+原生中文、暴躁人格的终端 AI 编码工具。从需求到开发测试的完整流程一个命令搞定。
+
+[快速开始](#快速开始) · [功能](#核心功能) · [命令](#命令列表) · [配置](#配置) · [自定义](#深度定制)
+
+</div>
+
+---
+
+## 这是什么
+
+fuckcode 是一个跑在终端里的 AI 编码助手——你对它说需求，它自己读文件、改代码、跑测试、查 bug。脾气不好但活儿干得漂亮。
+
+和 Claude Code / opencode 对标，但：
+
+- **原生中文**：system prompt、工具描述、界面、错误提示全中文
+- **暴躁人格**：嘴上不饶人，但技术方案扎实
+- **`/workflow` 四阶段**：理解→实现→验证→回顾，全自动闭环
+- **`/goal` 目标驱动**：设个目标它持续干到达成
+- **15 个工具**：Read / Write / Edit / Bash / Grep / Glob / Task / TodoWrite / WebSearch / WebFetch / Skill / LSP...
+- **多 Provider**：Anthropic / OpenAI / MiniMax / DeepSeek / Ollama 等
+- **MCP 客户端**：接外部工具生态（GitHub / 数据库 / 浏览器）
+- **Skill 系统**：按需加载的领域知识包
+- **记忆系统**：跨会话记住你的偏好
 
 ## 快速开始
 
-### 前置要求
-
-- [Bun](https://bun.sh) ≥ 1.2（M1 已实测 bun 1.3.14）
-- macOS（M1 仅支持 Mac）
-
-### 安装依赖
+### 方式一：编译二进制（推荐，不需要装 Bun）
 
 ```bash
+git clone https://github.com/maken2012/fuck-code.git
+cd fuck-code
 bun install
+bun run build                    # 编译成单文件二进制（64M）
+./fuckcode                       # 直接跑，不需要 Bun
 ```
 
-> 本项目默认走国内 npm 镜像（`bunfig.toml` 配了 `registry.npmmirror.com`），如需改回官方源修改 `bunfig.toml`。
-
-### 设置 API Key（M2 起）
-
-M2 开始需要 Anthropic API Key 才能真实对话。二选一：
+全局安装：
 
 ```bash
-# 方式 1：环境变量（推荐）
-export ANTHROPIC_API_KEY=sk-ant-...
+bun run install:binary           # 编译 + 拷到 /usr/local/bin/
+fuckcode                         # 任意目录运行
+fc                               # 简称也行
+```
 
-# 方式 2：写入配置文件
+### 方式二：开发模式
+
+```bash
+git clone https://github.com/maken2012/fuck-code.git
+cd fuck-code
+bun install                      # 需要 Bun >= 1.2
+bun run dev                      # 直跑 TS 源码
+```
+
+### 设置 API Key
+
+```bash
+# 方式一：配置文件（推荐）
 mkdir -p ~/.fuckcode
-echo '{"apiKey":"sk-ant-..."}' > ~/.fuckcode/config.json
+cat > ~/.fuckcode/config.json << 'EOF'
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "apiKey": "sk-ant-你的key"
+}
+EOF
+
+# 方式二：环境变量
+export ANTHROPIC_API_KEY=sk-ant-你的key
+
+# 方式三：CLI flag
+bun run dev -- --api-key sk-ant-你的key
 ```
 
-### 运行
+### 第三方 Provider（MiniMax / DeepSeek / Ollama 等）
 
-```bash
-# 开发模式（直接跑 TS 源码）
-bun run dev
-
-# 通过 bin 入口运行
-bun run start
-
-# 命令行临时覆盖配置（优先级：flag > 项目 config > 用户 config）
-bun run dev -- --model claude-opus-4-1-20250805
-bun run dev -- --api-base-url https://your-proxy.com/anthropic --api-key sk-xxx
+```json
+{
+  "model": "MiniMax-M3",
+  "apiBaseUrl": "https://api.minimaxi.com/anthropic",
+  "provider": "anthropic",
+  "apiKey": "sk-cp-你的key"
+}
 ```
 
-进入交互 REPL 后会看到欢迎框，输入文字回车即可对话（流式显示）。支持多轮上下文。`Ctrl+C` 在生成中中断当前轮次，空闲时退出程序。`/model` 运行时切换模型，`/clear` 清空上下文，`/exit` 退出。
+> `provider` 字段很重要：MiniMax 等用 Anthropic 兼容接口的服务要设 `"provider": "anthropic"`，否则会 404。
 
-⚠️ fuckcode 需要交互式终端（TTY），不能在管道或重定向 stdin 下运行。
+Ollama / vLLM 等本地模型：
+
+```json
+{
+  "model": "llama3",
+  "apiBaseUrl": "http://localhost:11434/v1",
+  "apiKey": "dummy"
+}
+```
+
+## 核心功能
+
+### 四阶段工作流 `/workflow`
+
+一个命令，自动从需求走到交付：
+
+```
+> /workflow 给用户列表加分页功能
+
+─── 理解需求 ──────────────────
+[READ] 找到 src/components/UserList.tsx
+[PLAN] 分析现有实现 + 设计分页方案
+
+─── 实现代码 ──────────────────
+[EDIT] 修改 UserList.tsx 加分页逻辑
+[WRITE] 创建 usePagination.ts hook
+
+─── 验证测试 ──────────────────
+[BASH] bun test
+[ OK ] 全部通过
+
+─── 回顾汇报 ──────────────────
+改了 2 个文件，测试通过，无遗留问题。
+```
+
+### 目标驱动 `/goal`
+
+设个目标，它持续干到达成（最多 10 轮）：
+
+```
+> /goal 所有测试通过并且 typecheck 0 错误
+```
+
+### 15 个内置工具
+
+| 工具 | 说明 |
+|------|------|
+| `[READ]` | 读文件（行号格式） |
+| `[WRITE]` | 写文件（整文件重写，需先读） |
+| `[EDIT]` | 字符串替换（写前必读 + mtime 校验） |
+| `[BASH]` | 执行命令（超时 + 后台 + 输出截断） |
+| `[GREP]` | ripgrep 内容搜索 |
+| `[GLOB]` | 文件匹配 |
+| `[TASK]` | 子 agent（explore / general / fork 三模式） |
+| `[TODO]` | 任务跟踪（pending / in_progress / completed） |
+| `[WEB]` | 抓 URL 内容（SSRF 防护） |
+| `[FIND]` | Web 搜索 |
+| `[ASK]` | 向用户问选择题 |
+| `[SKILL]` | 按需加载领域知识 |
+| `[LSP]` | TypeScript 类型诊断 |
+| `[TREE]` | 创建 git worktree 隔离改动 |
+| `[BACK]` | 退出 worktree |
+
+### 安全保障
+
+- **Edit/Write 写前必读**：没读过的文件不让改（防盲改）
+- **mtime 校验**：读完后文件被外部改过则拒绝编辑（防覆盖）
+- **权限管线**：allow / ask / deny 三级 + 弹窗确认
+- **SSRF 防护**：WebFetch 拒绝内网地址
+- **文件 checkpoint**：每次 Edit/Write 前自动备份，`/rewind` 一键回滚
+
+## 命令列表
+
+输入 `/` 自动弹出命令提示（上下选中、Tab 确认）：
+
+| 命令 | 说明 |
+|------|------|
+| `/workflow <需求>` | 四阶段工作流（理解 > 实现 > 验证 > 回顾） |
+| `/goal <目标>` | 目标驱动：持续工作直到达成 |
+| `/plan <需求>` | 只读分析，产出实施计划 |
+| `/context` | 分析上下文 token 占用 |
+| `/diff` | 查看本次会话改动 |
+| `/rewind [N]` | 回滚文件到 checkpoint |
+| `/model [名]` | 查看 / 切换模型 |
+| `/skills [create]` | 查看 / 创建 skill |
+| `/sessions` | 列出历史会话 |
+| `/resume <N>` | 恢复历史会话 |
+| `/cost` | token 用量 |
+| `/less-perms` | 生成权限白名单 |
+| `/init` | 生成 AGENTS.md |
+| `/agents` | 显示 AGENTS.md |
+| `/clear` | 清空上下文 |
+| `/help` | 完整帮助 |
+| `/exit` | 退出 |
+
+**快捷键**：`上下` 历史 / `Tab` 补全 / `Esc` 清空 / `Ctrl+C` 中断或退出 / `Ctrl+L` 清屏
 
 ## 配置
 
-配置文件位置（后者覆盖前者）：
+配置文件三层覆盖（优先级：CLI flag > 项目 > 用户）：
 
 - 用户级：`~/.fuckcode/config.json`
-- 项目级：`<项目根>/.fuckcode/config.json`
+- 项目级：`.fuckcode/config.json`
 
 完整字段：
 
 ```json
 {
   "model": "claude-sonnet-4-5-20250929",
+  "fallbackModels": ["claude-haiku-3-5"],
   "apiKey": "sk-ant-...",
+  "apiBaseUrl": "https://api.anthropic.com",
+  "provider": "anthropic",
   "permissions": {
     "allow": ["Read", "Glob", "Grep", "Bash(git status)"],
     "ask": ["Edit(src/**)"],
@@ -70,100 +216,147 @@ bun run dev -- --api-base-url https://your-proxy.com/anthropic --api-key sk-xxx
   },
   "permissionMode": "default",
   "maxTokens": 8192,
-  "contextWindow": 200000,
-  "apiBaseUrl": "https://your-proxy.example.com/anthropic"
+  "contextWindow": 200000
 }
 ```
 
-> `apiBaseUrl` 可选，用于第三方 Anthropic 兼容中转（OpenRouter、国内代理等）。不填则直连 `https://api.anthropic.com`。也可走 `ANTHROPIC_BASE_URL` 环境变量。
-
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `model` | `claude-sonnet-4-5-20250929` | 模型 ID（M2 接入 Anthropic） |
-| `apiKey` | — | Anthropic API Key，也可走 `ANTHROPIC_API_KEY` 环境变量 |
-| `apiBaseUrl` | — | 第三方兼容 API 的 baseURL（中转/代理），也可走 `ANTHROPIC_BASE_URL` 环境变量 |
-| `permissions.allow/ask/deny` | `[]` | 权限规则（M4 实现） |
+| `model` | `claude-sonnet-4-5-20250929` | 模型 ID |
+| `fallbackModels` | `[]` | 主模型 429 时按序切备用 |
+| `apiKey` | — | API Key（也可用环境变量） |
+| `apiBaseUrl` | — | 第三方兼容 API 地址 |
+| `provider` | 自动判定 | `anthropic` / `openai` / `openai-compatible` |
+| `permissions` | 空 | 权限规则 |
 | `permissionMode` | `default` | `default` / `acceptEdits` / `plan` / `bypassPermissions` |
-| `maxTokens` | `8192` | 单次响应最大 token |
-| `contextWindow` | `200000` | 上下文窗口大小 |
+| `maxTokens` | `8192` | 单次最大 token |
+| `contextWindow` | `200000` | 上下文窗口 |
 
-## 架构
+## 深度定制
 
-四层（详见 [设计文档](docs/superpowers/specs/2026-07-13-fuckcode-mvp-design.md)）：
-
-```
-┌─ TUI 层 (Ink/React) ─ REPL 交互
-├─ Agent Loop 层 (async generator) ─ queryLoop + 流式工具执行（M2+）
-├─ Service 层 (Effect.ts) ─ Config / Logger / Session / Permission
-└─ 工具层 (async) ─ Read/Write/Edit/Bash/Glob/Grep（M3+）
-```
-
-**中度 Effect**：Service 层用 Effect.ts 的 Context.Tag + Layer + Runtime 享受组合/重试/资源管理；Agent Loop 与工具用 async generator，照搬 Claude Code 的成熟模式。Service 对外暴露 async API，上层不感知 Effect。
-
-### 代码结构
+### AGENTS.md（项目级行为约定）
 
 ```
-src/
-├── cli.tsx              Commander 入口，解析参数启动 REPL
-├── version.ts           版本号常量
-├── repl/
-│   ├── App.tsx          Ink render 入口（startRepl）
-│   └── Repl.tsx         REPL 状态机（欢迎语+输入框+回显）
-└── services/
-    ├── runtime.ts       Effect Runtime 装配中心
-    ├── Config.ts        配置加载（Zod 校验 + user/project 合并）
-    ├── Logger.ts        stderr 结构化日志
-    └── Paths.ts         ~/.fuckcode 路径解析
+/init    # 生成模板
+```
+
+编辑 `AGENTS.md`，写明代码风格、常用命令、禁忌。agent 启动自动加载，向上查找多层级合并。
+
+### Skill（按需加载的领域知识）
+
+```
+/skills create vue-debug    # 创建 skill
+/skills                     # 查看已有
+```
+
+在 `.fuckcode/skills/<名字>/SKILL.md` 写领域知识。兼容 `.claude/skills/` 格式。
+
+### 记忆系统（跨会话持久化）
+
+agent 自动从对话中提取偏好和约定（"以后都用 bun"），存到 `.fuckcode/memory/`。下次对话自动注入。
+
+### MCP 客户端（接外部工具）
+
+```json
+// .fuckcode/mcp.json
+{
+  "mcpServers": {
+    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },
+    "remote": { "url": "https://example.com/mcp", "transport": "http" }
+  }
+}
+```
+
+支持 stdio / sse / http 三种 transport。
+
+### Hook 系统
+
+```json
+// .fuckcode/hooks.json
+{
+  "hooks": {
+    "PreToolUse": [{ "matcher": "Edit", "command": "echo '改文件' >> /tmp/fc.log" }]
+  }
+}
+```
+
+### 自定义斜杠命令
+
+```markdown
+<!-- .fuckcode/commands/commit.md -->
+---
+description: 帮我写 commit
+---
+帮我写 commit message。改动如下：
+!git diff --stat
+```
+
+### 自定义工具
+
+```typescript
+// .fuckcode/tools/my-tool.ts
+export default buildTool({
+  name: 'MyTool',
+  description: '我的自定义工具',
+  // ...
+})
+```
+
+### `--safe-mode`（排查问题）
+
+```bash
+fuckcode --safe-mode    # 禁用所有定制（AGENTS.md / memory / hooks / MCP / 自定义命令）
 ```
 
 ## 开发
 
 ```bash
-bun test              # 运行测试（M1: 16 tests）
-bun run typecheck     # 类型检查（tsc --noEmit）
-bun run dev           # 启动 REPL
+bun install              # 装依赖
+bun test                 # 跑测试（252 tests）
+bun run typecheck        # 类型检查
+bun run dev              # 开发模式
+bun run build            # 编译二进制
+```
+
+### 技术栈
+
+- **TypeScript + Bun** — 运行时 + 包管理
+- **Effect.ts** — 服务层（中度使用）
+- **Ink + React** — 终端 UI
+- **Anthropic SDK + OpenAI SDK** — 多 provider
+- **MCP SDK** — 外部工具生态
+
+### 架构
+
+```
+TUI 层 (repl/, Ink/React)
+  ↓
+Agent 层 (agent/, async generator) ← queryLoop 核心循环
+  ↓
+LLM 层 (llm/, provider 路由)  +  工具层 (tools/, async)
+  ↓
+Service 层 (services/, Effect.ts)
 ```
 
 ## 路线图
 
-| 里程碑 | 内容 | 状态 |
-|--------|------|------|
-| **M1 骨架** | Bun 工程 + Effect runtime + Ink REPL + Config/Logger | ✅ |
-| **M2 LLM + loop** | Anthropic 流式 + queryLoop + 多轮上下文 + abort | ✅ |
-| **M3 工具系统** | Tool 接口 + Read/Glob/Grep + queryLoop 工具循环 | ✅ |
-| **M4 写工具 + 权限** | Write/Edit/Bash + 权限决策管线 + ask 弹窗 | ✅ |
-| **M5 会话 + 压缩** | JSONL 存储 + 会话恢复 + autoCompact | ✅ |
-| **M6 打磨发布** | prompt cache + /cost/help + 网络重试 + 错误加固 | ✅ |
-| **v0.2a 一次性模式** | runOnce + stdin 管道 + --plan flag | ✅ |
-| **v0.2b plan 计划模式** | /plan 命令 + 五段式实施计划输出 | ✅ |
-| **v0.2c Task 子 agent** | 派子 agent 隔离探索/调研（explore/general） | ✅ |
-| **v0.3 AGENTS.md** | 项目级指令文件 + /init /agents | ✅ |
-| **v1.0 工作流层** | /workflow 四阶段（理解→实现→验证→回顾）★ 核心差异化 | ✅ |
-| **v1.1 扩展工具** | TodoWrite + WebSearch/WebFetch + 自定义命令 + 动态工具 | ✅ |
-| **v1.2 性能+UX** | 并发执行 + AskUserQuestion + 输入历史 ↑↓ | ✅ |
-| **v1.3 Hook 系统** | PreToolUse/PostToolUse/UserPromptSubmit 可扩展 | ✅ |
-| **v1.4 生态接入** | MCP 客户端（stdio）+ 多 provider（OpenAI 兼容） | ✅ |
-| **v1.5 记忆+压缩** | 记忆系统（memdir）+ microCompact 细粒度压缩 | ✅ |
-| **v1.6 安全+增强** | 文件 checkpoint /rewind + 子 agent fork 模式 | ✅ |
-| **v1.7 深度增强** | fork history 继承 + 输入历史跨会话 + LSP 诊断工具 | ✅ |
-| **v1.8 记忆优化** | findRelevantMemories 按相关性筛选 + sidechain transcript | ✅ |
-| **v1.9 生态扩展** | MCP 多 transport（sse/http）+ git worktree 工具 | ✅ |
-| **v1.10 体验打磨** | diff 渲染 + /diff 命令 + StatusLine 状态栏 | ✅ |
-| **v1.11 学 Claude Code** | fallbackModel 链 + /context + --safe-mode + /goal 目标驱动 | ✅ |
-| **v1.12 Skill+记忆** | Skill 系统 + 自动记忆提取 + /less-permission-prompts | ✅ |
-| v1.1+ | MCP 客户端 / 插件系统 / TodoWrite 任务跟踪 | ⬜ |
-
-完整设计见 [MVP 设计文档](docs/superpowers/specs/2026-07-13-fuckcode-mvp-design.md)，M1 实现计划见 [M1 计划文档](docs/superpowers/plans/2026-07-13-fuckcode-m1-skeleton.md)。
+- [x] M1-M6 MVP（骨架 + LLM + 工具 + 权限 + 会话 + 打磨）
+- [x] v1.0 工作流层（`/workflow` 四阶段）
+- [x] v1.1-v1.3 扩展工具 + 并发执行 + Hook
+- [x] v1.4 MCP 客户端 + 多 provider
+- [x] v1.5-v1.6 记忆系统 + checkpoint + 子 agent fork
+- [x] v1.7-v1.12 LSP + 输入持久化 + Skill + 自动记忆 + fallbackModel + `/goal`
+- [ ] 多平台二进制（Linux / Windows）
+- [ ] 插件系统
+- [ ] background agents
 
 ## 参考来源
 
-本项目参考了两个优秀的同类工具，取其精华：
+- **[Claude Code](https://github.com/anthropics/claude-code)** — 工具接口、queryLoop、权限管线、写前必读
+- **[opencode](https://github.com/sst/opencode)** — Effect.ts 架构、MCP 客户端、AGENTS.md
 
-- **Claude Code 逆向源码**（TypeScript + Bun + React/Ink）— 工具接口设计、queryLoop async generator、权限决策管线、FileEdit 写前必读
-- **opencode 官方源码**（TypeScript + Bun + Effect.ts）— Effect Service/Layer/Runtime 组织、权限 Deferred 模式
-
-差异化：原生中文交互、中度 Effect 取舍、工作流导向（需求→开发→测试，v1.0）。
+差异化：原生中文 + 暴躁人格 + `/workflow` 四阶段 + 自动记忆零成本。
 
 ## License
 
-私有项目。
+MIT

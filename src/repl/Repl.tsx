@@ -17,6 +17,7 @@ import { PLAN_MODE_INSTRUCTION } from '@/agent/planPrompt.js'
 import { runWorkflow } from '@/agent/workflow.js'
 import type { WorkflowStage } from '@/agent/workflow.js'
 import { runGoal } from '@/agent/goalRunner.js'
+import { attitudeFor, LOGO, toolEmoji } from '@/personality.js'
 import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
 import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
 import { listCheckpoints, restoreCheckpoint } from '@/tools/checkpoint.js'
@@ -71,6 +72,9 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const historyIndexRef = useRef<number>(-1) // -1 表示当前输入，>=0 表示浏览历史第 N 项
   const [history, setHistory] = useState<DisplayMessage[]>([])
   const [running, setRunning] = useState(false)
+  // UX: Tab 补全状态（输入 / 后 Tab 显示命令列表）
+  const [tabCompletions, setTabCompletions] = useState<string[] | null>(null)
+  const [tabIndex, setTabIndex] = useState(0)
   const [configLoaded, setConfigLoaded] = useState(false)
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null)
@@ -181,7 +185,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           case 'tool_use_start': {
             // 渲染"📖 调用 {tool}"提示（input 截断到 80 字符避免刷屏）
             const inputStr = JSON.stringify(event.input) ?? ''
-            const note = `📖 调用 ${event.tool}: ${inputStr.slice(0, 80)}`
+            const note = `${toolEmoji(event.tool)} ${event.tool}: ${inputStr.slice(0, 80)}`
             setHistory((h) => [
               ...h,
               { role: 'assistant', text: note },
@@ -190,8 +194,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           }
           case 'tool_result': {
             const note = event.ok
-              ? `✓ ${event.tool} 完成`
-              : `✗ ${event.tool} 失败: ${event.content}`
+              ? `${toolEmoji(event.tool)} 搞定 ${event.tool}`
+              : `${toolEmoji(event.tool)} 搞砸了 ${event.tool}: ${event.content}`
             setHistory((h) => [
               ...h,
               { role: 'assistant', text: note },
@@ -249,7 +253,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
               ...h,
               {
                 role: 'assistant',
-                text: `❌ 错误: ${event.error.message}`,
+                text: `${attitudeFor('error')} ${event.error.message}`,
               },
             ])
             break
@@ -268,7 +272,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         const copy = [...h]
         copy[copy.length - 1] = {
           role: 'assistant',
-          text: `❌ 启动失败: ${String(e)}`,
+          text: `靠，炸了: ${String(e)}`,
         }
         return copy
       })
@@ -333,7 +337,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     } catch (e) {
       setHistory((h) => {
         const copy = [...h]
-        copy[copy.length - 1] = { role: 'assistant' as const, text: `❌ 计划失败: ${String(e)}` }
+        copy[copy.length - 1] = { role: 'assistant' as const, text: `计划泡汤: ${String(e)}` }
         return copy
       })
     } finally {
@@ -386,13 +390,13 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             setHistory((h) => [...h, { role: 'assistant' as const, text: `\n🔍 检查目标是否达成...` }])
             break
           case 'goal_achieved':
-            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n✅ 目标达成！（第 ${event.turn} 轮）` }])
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n目标算是达成了（折腾了 ${event.turn} 轮）` }])
             break
           case 'goal_max_turns':
-            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n⚠ 达到最大轮次（${event.turns}），目标未达成` }])
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n操，跑了 ${event.turns} 轮还没搞定，老子不干了` }])
             break
           case 'goal_aborted':
-            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n⚠ 目标工作中断（已完成 ${event.turns} 轮）` }])
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `\n被打断了（搞了 ${event.turns} 轮）` }])
             break
           case 'goal_error':
             setHistory((h) => [...h, { role: 'assistant' as const, text: `\n❌ 目标执行错误: ${event.error}` }])
@@ -400,7 +404,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         }
       }
     } catch (e) {
-      setHistory((h) => [...h, { role: 'assistant' as const, text: `❌ 目标失败: ${String(e)}` }])
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `目标黄了: ${String(e)}` }])
     } finally {
       setRunning(false)
       abortRef.current = null
@@ -469,7 +473,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           case 'workflow_done':
             setHistory((h) => [
               ...h,
-              { role: 'assistant' as const, text: `\n✨ 工作流完成（四阶段全跑完）` },
+              { role: 'assistant' as const, text: `\n齐活了，四阶段跑完。` },
             ])
             break
           case 'workflow_aborted':
@@ -489,7 +493,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     } catch (e) {
       setHistory((h) => [
         ...h,
-        { role: 'assistant' as const, text: `❌ 工作流失败: ${String(e)}` },
+        { role: 'assistant' as const, text: `工作流拉胯了: ${String(e)}` },
       ])
     } finally {
       setRunning(false)
@@ -792,6 +796,50 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       exit()
       return
     }
+    // UX: Esc 清空输入（退出 Tab 补全模式）
+    if (inputChar === '\x1b' || key.escape) {
+      if (tabCompletions) {
+        setTabCompletions(null)
+        setTabIndex(0)
+      } else {
+        setInput('')
+      }
+      return
+    }
+    // UX: Ctrl+L 清屏（清空显示历史，保留对话上下文）
+    if (key.ctrl && inputChar === 'l') {
+      setHistory([])
+      setTabCompletions(null)
+      return
+    }
+    // UX: Tab 补全（输入 / 开头时列出/切换命令）
+    if (key.tab && input.startsWith('/')) {
+      const allCommands = [
+        '/help', '/exit', '/quit', '/clear', '/cost', '/model', '/context',
+        '/workflow', '/goal', '/plan', '/diff', '/rewind', '/less-perms',
+        '/init', '/agents', '/sessions', '/resume', '/instructions',
+      ]
+      const matches = allCommands.filter((c) => c.startsWith(input))
+      if (matches.length === 0) {
+        setTabCompletions(null)
+      } else if (tabCompletions && tabCompletions.length > 0) {
+        // 已在补全模式：切换到下一个
+        const next = (tabIndex + 1) % tabCompletions.length
+        setTabIndex(next)
+        setInput(tabCompletions[next]!)
+      } else {
+        // 首次 Tab：显示匹配列表，填入第一个
+        setTabCompletions(matches)
+        setTabIndex(0)
+        setInput(matches[0]!)
+      }
+      return
+    }
+    // 非 / 开头或非 tab：清除补全状态
+    if (tabCompletions) {
+      setTabCompletions(null)
+      setTabIndex(0)
+    }
     // 回车提交
     if (key.return) {
       const text = input.trim()
@@ -916,23 +964,38 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
           ...h,
           {
             role: 'assistant' as const,
-            text: `可用命令：
-/clear — 清空当前对话上下文
-/cost — 显示本次会话 token 用量
-/help — 显示此帮助
-/model [名] — 查看或切换模型
-/plan <需求> — 分析需求并产出实施计划（只读，不改文件）
-/workflow <需求> — ★ 自动走"理解→实现→验证→回顾"四阶段完整工作流
-/goal <条件> — 目标驱动：跨轮次持续工作直到条件达成
-/context — 分析上下文 token 占用 + 优化建议
-/less-perms — 生成 allowlist 建议减少权限弹窗
-/rewind [N] — 回滚文件到 Edit/Write 前的 checkpoint
-/diff — 查看本会话所有改动（diff 格式）
-/init — 生成 AGENTS.md 模板（项目级 agent 行为约定）
-/agents — 显示当前加载的 AGENTS.md 指令
-/sessions — 列出历史会话
-/resume <N> — 恢复第 N 个历史会话
-/exit — 退出 fuckcode`,
+            text: `可用命令（输入 / 后按 Tab 补全）：
+
+【工作流】
+  /workflow <需求>  ★ 四阶段：理解→实现→验证→回顾
+  /goal <条件>      目标驱动：持续工作直到达成
+  /plan <需求>      只读分析，产出实施计划
+
+【上下文】
+  /context    分析 token 占用 + 优化建议
+  /diff       查看本会话改动（diff 格式）
+  /rewind [N] 回滚文件到 checkpoint
+  /cost       显示 token 用量
+
+【模型/权限】
+  /model [名]     查看或切换模型
+  /less-perms     生成 allowlist 减少弹窗
+
+【项目/会话】
+  /init           生成 AGENTS.md 模板
+  /agents         显示 AGENTS.md 指令
+  /sessions       列出历史会话
+  /resume <N>     恢复历史会话
+  /clear          清空当前上下文
+
+【快捷键】
+  Tab             补全斜杠命令
+  ↑↓              浏览输入历史
+  Esc             清空输入 / 退出补全
+  Ctrl+C          中断生成 / 退出
+  Ctrl+L          清屏
+
+  /exit /quit     退出`,
           },
         ])
         setInput('')
@@ -1016,52 +1079,92 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-        <Text bold color="cyan">
-          fuckcode <Text dimColor>v{version}</Text>
+      {/* 欢迎框：🖕 + 暴躁欢迎语 */}
+      <Box flexDirection="column" borderStyle="round" borderColor="red" paddingX={1} paddingY={0}>
+        <Text bold color="red">
+          {LOGO} fuckcode <Text dimColor>v{version}</Text>
+          {currentModel && <Text dimColor> · {currentModel}</Text>}
         </Text>
-        {currentModel && <Text dimColor>模型: {currentModel}</Text>}
-        <Text dimColor>原生中文交互的终端 AI 编码工具</Text>
+        <Text dimColor italic>{attitudeFor('welcome')}</Text>
       </Box>
 
-      {history.map((m, i) => (
-        <Box key={i} flexDirection="column">
-          <Text color={m.role === 'user' ? 'green' : 'blue'}>
-            {m.role === 'user' ? '你' : 'fuckcode'}: {m.text}
-            {m.role === 'assistant' && m.text === '' && running ? '▋' : ''}
-          </Text>
-        </Box>
-      ))}
+      {/* 消息流：user 和 assistant 视觉分明 */}
+      {history.map((m, i) => {
+        if (m.role === 'user') {
+          // user 消息：> 前缀 + 绿色 + dim 背景（像 Claude Code）
+          return (
+            <Box key={i} marginTop={i === 0 ? 1 : 0}>
+              <Text color="green" bold>{'> '}</Text>
+              <Text color="green">{m.text}</Text>
+            </Box>
+          )
+        }
+        // assistant 消息：无前缀，白色/默认色
+        // 工具调用类消息（以 📖/✓/✗/🔧/📋/🎯/⚠ 开头）用 dim 色
+        const isToolCall = /^[📖✓✗🔧📋🎯⚠❌]/.test(m.text)
+        const isSectionHeader = /^---|^✨|^✅目标|^⚠目标/.test(m.text)
+        if (isToolCall) {
+          return (
+            <Box key={i} flexDirection="column" marginLeft={2}>
+              <Text dimColor>{m.text}</Text>
+            </Box>
+          )
+        }
+        if (isSectionHeader) {
+          return (
+            <Box key={i} marginTop={1}>
+              <Text color="yellow" bold>{m.text}</Text>
+            </Box>
+          )
+        }
+        return (
+          <Box key={i} flexDirection="column">
+            <Text color={m.text === '' && running ? 'blue' : 'white'}>
+              {m.text}
+              {m.text === '' && running ? <Text color="blue">▋</Text> : ''}
+            </Text>
+          </Box>
+        )
+      })}
 
-      <Box marginTop={1}>
-        <Text color="green">❯ </Text>
-        <Text>{input}</Text>
-        {!running && <Text color="gray">▋</Text>}
-      </Box>
-
-      {pendingPermission && (
-        <Box
-          marginTop={1}
-          flexDirection="column"
-          borderStyle="round"
-          borderColor="yellow"
-          paddingX={1}
-        >
-          <Text color="yellow" bold>
-            ⚠ 权限请求：{pendingPermission.tool} 要执行
-          </Text>
-          <Text>{pendingPermission.summary.slice(0, 80)}</Text>
-          <Text dimColor>允许？[y=允许 / n=拒绝 / Ctrl+C=拒绝]</Text>
+      {/* Tab 补全列表 */}
+      {tabCompletions && tabCompletions.length > 0 && (
+        <Box marginTop={1} flexDirection="column">
+          <Text dimColor>── 补全（Tab 切换 · Esc 取消）──</Text>
+          {tabCompletions.map((cmd, i) => (
+            <Text key={cmd} color={i === tabIndex ? 'cyan' : 'gray'}>
+              {i === tabIndex ? '▶ ' : '  '}{cmd}
+            </Text>
+          ))}
         </Box>
       )}
 
-      <Box marginTop={1}>
+      {/* 权限弹窗 */}
+      {pendingPermission && (
+        <Box marginTop={1} flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
+          <Text color="yellow" bold>⚠ {pendingPermission.tool}</Text>
+          <Text>{pendingPermission.summary.slice(0, 80)}</Text>
+          <Text dimColor>[y] 允许 · [n] 拒绝 · [Ctrl+C] 拒绝</Text>
+        </Box>
+      )}
+
+      {/* 输入框：独立区域，红色边框，暴躁主题 */}
+      {!pendingPermission && (
+        <Box marginTop={1} borderStyle="single" borderColor={running ? 'gray' : 'red'} paddingX={1}>
+          <Text color={running ? 'gray' : 'yellow'} bold>{running ? '⏳ ' : '> '}</Text>
+          <Text color={running ? 'gray' : 'white'}>{input}</Text>
+          {!running && <Text color="red">▋</Text>}
+        </Box>
+      )}
+
+      {/* 底部状态栏 */}
+      <Box marginTop={0}>
         <Text dimColor>
           {pendingPermission
-            ? '等待权限确认...'
+            ? attitudeFor('permission')
             : running
-              ? `正在生成（${currentModel}）... Ctrl+C 中断`
-              : `${currentModel} · ${totalTokensRef.current.input + totalTokensRef.current.output} tokens · /help · /diff · /rewind · /exit`}
+              ? `${attitudeFor('generating')} [Ctrl+C 中断]`
+              : `${currentModel} · ${totalTokensRef.current.input + totalTokensRef.current.output} tok · ${attitudeFor('idle')}`}
         </Text>
       </Box>
     </Box>

@@ -93,10 +93,11 @@ test('Repl 渲染欢迎语和输入框', () => {
 
 test('Repl 显示快捷键提示', () => {
   const { lastFrame, unmount } = renderWithFrame(
-    <Repl version="0.1.0" initialModel="m" />,
+    <Repl version="0.1.0" initialModel="暴躁模型" />,
   )
   unmount()
   const frame = lastFrame() ?? ''
-  // v1.10: 底部 StatusLine 显示模型名 + 命令提示
-  expect(frame).toMatch(/tokens|\/help|\/exit/) // 底部状态栏含命令提示
+  // v1.13: 底部状态栏含模型名 + 暴躁文案
+  expect(frame).toContain('暴躁模型')
+  expect(frame).toContain('fuckcode') // 欢迎框
 })

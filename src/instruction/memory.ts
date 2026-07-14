@@ -78,6 +78,46 @@ export function formatMemoriesForPrompt(memories: Memory[]): string {
   return `\n\n# 记忆（跨会话持久化）\n以下是之前积累的记忆，参考它们来保持一致性：\n\n${lines.join('\n')}`
 }
 
+// v1.8: 按相关性筛选记忆（关键词匹配，避免全量注入爆上下文）。
+// 记忆数 ≤5 全量返回；>5 时按 query 关键词评分取 top 5。
+// preference 类（用户偏好）永远保留——它们影响所有对话。
+export function findRelevantMemories(memories: Memory[], query: string, maxResults = 5): Memory[] {
+  if (memories.length <= maxResults) return memories
+
+  const preferences = memories.filter((m) => m.type === 'preference')
+  const others = memories.filter((m) => m.type !== 'preference')
+
+  const queryLower = query.toLowerCase()
+  // 中英文混合分词：英文按标点空格，中文按 2-gram
+  const terms: string[] = queryLower.split(/[\s,，。.;；!！?？()（）{}"'`]+/).filter((t) => t.length >= 2)
+  // 中文 2-gram
+  const cjk = queryLower.match(/[\u4e00-\u9fa5]/g)
+  if (cjk) {
+    for (let i = 0; i < queryLower.length - 1; i++) {
+      if (/[\u4e00-\u9fa5]/.test(queryLower[i] ?? '') && /[\u4e00-\u9fa5]/.test(queryLower[i + 1] ?? '')) {
+        terms.push(queryLower.slice(i, i + 2))
+      }
+    }
+  }
+  const queryTerms = new Set(terms)
+
+  const scored = others.map((m) => {
+    const text = `${m.name} ${m.description} ${m.content}`.toLowerCase()
+    let score = 0
+    for (const term of queryTerms) {
+      if (text.includes(term)) score += 1
+    }
+    return { memory: m, score }
+  })
+
+  scored.sort((a, b) => b.score - a.score)
+  const selected = scored
+    .slice(0, Math.max(0, maxResults - preferences.length))
+    .map((s) => s.memory)
+
+  return [...preferences, ...selected]
+}
+
 // 保存新记忆（创建 .md 文件）
 export async function saveMemory(
   cwd: string,

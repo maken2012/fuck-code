@@ -121,6 +121,16 @@ export const TaskTool = buildTool<TaskInputType>({
       // explore/general 用空 history（独立上下文），fork 用父 history（延续）
       const subHistory: ChatMessage[] = isFork ? (ctx.parentHistory ?? []) : []
 
+      // v1.8: sidechain transcript——子 agent 用独立 session 文件持久化
+      // 失败不阻塞（subSessionId 为 undefined 时 queryLoop 不持久化）
+      let subSessionId: string | undefined
+      try {
+        const { createSession } = await import('@/services/Session.js')
+        subSessionId = await createSession(ctx.cwd)
+      } catch {
+        // 无 session 也能跑
+      }
+
       // 子 agent 的 mini queryLoop（复用 queryLoop 函数）
       for await (const event of queryLoop({
         history: subHistory,
@@ -133,6 +143,9 @@ export const TaskTool = buildTool<TaskInputType>({
         permissionMode: isExplore ? 'plan' : 'acceptEdits', // explore 只读；general 接受编辑
         permissions: { allow: [], ask: [], deny: [] },
         contextWindow: 200000,
+        // v1.8: sidechain transcript——子 agent 用独立 session 文件，
+        // 不污染主上下文（主 agent 只收 subResult 文本摘要）
+        sessionId: subSessionId,
       })) {
         if (event.type === 'text_delta') {
           subResult += event.text

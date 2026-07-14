@@ -5,11 +5,13 @@
 // v0.3: AGENTS.md 指令文件注入（项目级行为约定）。
 import type { Tool } from '@/tools/Tool.js'
 import { loadInstructions } from '@/instruction/agentsMd.js'
-import { loadMemories, formatMemoriesForPrompt } from '@/instruction/memory.js'
+import { loadMemories, formatMemoriesForPrompt, findRelevantMemories } from '@/instruction/memory.js'
 
 export interface BuildSystemPromptOpts {
   /** M3：可用工具列表。每个工具的 prompt 会拼进 system prompt 末尾。 */
   tools?: Tool[]
+  /** v1.8：用户当前输入，用于 findRelevantMemories 按相关性筛选记忆 */
+  userQuery?: string
 }
 
 // 缓存已加载的指令（启动期加载一次，避免每次 queryLoop 都读文件）
@@ -61,7 +63,9 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
   const instructionSection = instructions ? `\n\n# 项目指令（AGENTS.md）\n以下指令由项目提供，优先级高于上面的默认约定：\n\n${instructions}` : ''
 
   // v1.5: 记忆注入（跨会话持久化的偏好/约定）
-  const memories = await loadMemories(process.cwd()).catch(() => [])
+  // v1.5+v1.8: 记忆注入。用 findRelevantMemories 按 userQuery 筛选（避免全量爆上下文）
+  const allMemories = await loadMemories(process.cwd()).catch(() => [])
+  const memories = opts?.userQuery ? findRelevantMemories(allMemories, opts.userQuery) : allMemories
   const memorySection = formatMemoriesForPrompt(memories)
 
   const toolSection = opts?.tools && opts.tools.length > 0

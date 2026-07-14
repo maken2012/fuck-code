@@ -75,7 +75,9 @@ export const TodoWriteTool = buildTool<TodoWriteInputType>({
   isConcurrencySafe: () => true,
 
   async execute(input) {
-    // 校验：最多一个 in_progress
+    // 深度比对第 24 轮: 状态机约束（对标 Claude Code）
+
+    // 校验 1: 最多一个 in_progress
     const inProgress = input.todos.filter((t) => t.status === 'in_progress')
     if (inProgress.length > 1) {
       return {
@@ -85,21 +87,43 @@ export const TodoWriteTool = buildTool<TodoWriteInputType>({
       }
     }
 
+    // 校验 2: completed 不允许回退（对标 Claude Code 单向状态机）
+    if (currentTodos.length > 0) {
+      for (const newTodo of input.todos) {
+        const oldTodo = currentTodos.find((t) => t.content === newTodo.content)
+        if (oldTodo && oldTodo.status === 'completed' && newTodo.status !== 'completed') {
+          return {
+            ok: false,
+            error: `任务"${newTodo.content}"已标记 completed，不允许回退到 ${newTodo.status}。已完成的任务应该保持 completed 状态。`,
+            isError: true,
+          }
+        }
+      }
+    }
+
     currentTodos = input.todos
 
-    // 格式化给模型看（带统计）
+    // 深度比对第 24 轮: 进度条渲染（对标 Claude Code 进度展示）
     const completed = input.todos.filter((t) => t.status === 'completed').length
+    const inProgressCount = input.todos.filter((t) => t.status === 'in_progress').length
+    const pending = input.todos.filter((t) => t.status === 'pending').length
     const total = input.todos.length
+    const pct = total > 0 ? Math.round((completed / total) * 100) : 0
+    // 进度条：█████░░░░░ 50%
+    const filled = Math.round((pct / 100) * 10)
+    const bar = '█'.repeat(filled) + '░'.repeat(10 - filled)
+
     const formatted = input.todos
       .map((t, i) => {
-        const mark = t.status === 'completed' ? 'x' : t.status === 'in_progress' ? 'o' : ' '
-        return `${i + 1}. [${mark}] ${t.content}`
+        const mark = t.status === 'completed' ? 'x' : t.status === 'in_progress' ? '~' : ' '
+        const activeText = t.activeForm && t.status === 'in_progress' ? ` (${t.activeForm})` : ''
+        return `${i + 1}. [${mark}] ${t.content}${activeText}`
       })
       .join('\n')
 
     return {
       ok: true,
-      data: `任务清单已更新（${completed}/${total} 完成）：\n${formatted}`,
+      data: `[${bar}] ${pct}% (${completed}/${total} 完成 · ${inProgressCount} 进行中 · ${pending} 待办)\n\n${formatted}`,
     }
   },
 })

@@ -109,8 +109,10 @@ export const ReadTool = buildTool<ReadInputType>({
       const slice = lines.slice(start, end)
 
       // cat -n 格式：行号右对齐 6 宽 + tab + 内容
+      // 深度比对第 57 轮: 行号用 → 分隔（对标 Claude Code utils/file.ts addLineNumbers）
+      // → (U+2192) 比 tab 更稳定（tab 在不同终端宽度对齐错乱）
       const numbered = slice
-        .map((line, i) => `${String(start + i + 1).padStart(6, ' ')}\t${line}`)
+        .map((line, i) => `${String(start + i + 1).padStart(6, ' ')}→${line}`)
         .join('\n')
 
       const totalLines = lines.length

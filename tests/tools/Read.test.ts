@@ -19,7 +19,7 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true })
 })
 
-test('读取存在的文件（验证 cat -n 行号格式：6 位数字 + tab）', async () => {
+test('读取存在的文件（验证 cat -n 行号格式：6 位数字 + →）', async () => {
   const filePath = resolve(tmpDir, 'foo.ts')
   await writeFile(filePath, 'const x = 1\nconst y = 2\n')
   const result = await ReadTool.execute({ file_path: filePath }, ctx)
@@ -27,9 +27,9 @@ test('读取存在的文件（验证 cat -n 行号格式：6 位数字 + tab）'
   if (result.ok) {
     expect(typeof result.data).toBe('string')
     expect(result.data as string).toContain('const x = 1')
-    // 行号格式：6 位右对齐 + tab + 内容（第一行 = "     1\tconst x = 1"）
-    expect(result.data as string).toMatch(/ {5}1\tconst x = 1/)
-    expect(result.data as string).toMatch(/ {5}2\tconst y = 2/)
+    // 深度比对第 57 轮: 行号格式 6 位右对齐 + → + 内容
+    expect(result.data as string).toMatch(/ {5}1→const x = 1/)
+    expect(result.data as string).toMatch(/ {5}2→const y = 2/)
   }
 })
 

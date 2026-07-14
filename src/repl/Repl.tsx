@@ -1250,18 +1250,44 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
 
     // 深度比对第 55 轮: /snapshot + /export 命令（对标 opencode snapshot/revert + share）
     reg.register(
-      { cmd: '/snapshot', desc: '创建当前会话快照', args: '<标签>', example: '/snapshot 重构前' },
+      { cmd: '/snapshot', desc: '创建/列出/恢复快照', args: '[list|restore <N>|<标签>]', example: '/snapshot 重构前' },
       async (args) => {
         if (!sessionId) {
           setHistory((h) => [...h, { role: 'assistant' as const, text: '[FAIL] 无活跃会话' }])
+          setInput('')
+          setCursorOffset(0)
           return
         }
         try {
-          const { createSnapshot } = await import('@/services/SessionSnapshot.js')
-          const snap = await createSnapshot(sessionId, process.cwd(), chatHistoryRef.current, args || '手动快照')
-          setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 快照已创建: ${snap.label} (${new Date(snap.createdAt).toLocaleString('zh-CN')})` }])
+          const { createSnapshot, listSnapshots, restoreSnapshot } = await import('@/services/SessionSnapshot.js')
+          // 深度比对第 57 轮: /snapshot list + /snapshot restore <N>
+          if (args === 'list' || !args) {
+            const snaps = await listSnapshots(sessionId, process.cwd())
+            if (snaps.length === 0) {
+              setHistory((h) => [...h, { role: 'assistant' as const, text: '没有快照。创建：/snapshot <标签>' }])
+            } else {
+              const list = snaps.slice(0, 10).map((s, i) =>
+                `${i + 1}. ${s.label} (${new Date(s.createdAt).toLocaleString('zh-CN')})`,
+              ).join('\n')
+              setHistory((h) => [...h, { role: 'assistant' as const, text: `快照列表：\n${list}\n\n恢复：/snapshot restore <序号>` }])
+            }
+          } else if (args.startsWith('restore ')) {
+            const idx = parseInt(args.slice('restore '.length)) - 1
+            const snaps = await listSnapshots(sessionId, process.cwd())
+            const target = snaps[idx]
+            if (!target) {
+              setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 无效序号（共 ${snaps.length} 个快照）` }])
+            } else {
+              const msgs = await restoreSnapshot(target)
+              chatHistoryRef.current = msgs
+              setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 已恢复到快照: ${target.label}` }])
+            }
+          } else {
+            const snap = await createSnapshot(sessionId, process.cwd(), chatHistoryRef.current, args)
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 快照已创建: ${snap.label} (${new Date(snap.createdAt).toLocaleString('zh-CN')})` }])
+          }
         } catch (e) {
-          setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 快照失败: ${String(e)}` }])
+          setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 快照操作失败: ${String(e)}` }])
         }
         setInput('')
         setCursorOffset(0)

@@ -27,27 +27,29 @@ export function getCurrentTodos(): TodoType[] {
 export const TodoWriteTool = buildTool<TodoWriteInputType>({
   name: 'TodoWrite',
   description: '管理任务清单（跟踪多步骤任务的进度）',
-  prompt: `管理你的任务清单。对 3 步以上的复杂任务，用它跟踪进度，避免遗漏步骤。
+  prompt: `管理你的任务清单。对 3 步以上的复杂任务，用它跟踪进度。
 
 参数：
-- todos（必填）：**完整的任务列表**，每次调用都传全量（不是增量更新）。每个 todo 含：
-  - content（必填）：任务描述，用祈使句（"修改 X"、"测试 Y"）
+- todos（必填）：**完整任务列表**（每次传全量，不是增量）。每个 todo：
+  - content（必填）：祈使句描述（"修改 X"）
   - status（必填）：pending / in_progress / completed
-  - activeForm（可选）：进行时态（"正在修改 X"），用于实时显示
+  - activeForm（可选）：进行时（"正在修改 X"），UI 显示
+  - recommended（可选）：标记推荐选项
+  - preview（可选）：预览内容
 
-规则：
-1. **同时只能有一个 in_progress**——开始下一个前先把当前的标 completed
-2. **测试没过不许标 completed**——只有验证通过才算完成
-3. 按依赖顺序排列（被依赖的在前）
-4. 任务完成或取消时立即更新清单（不要等到最后批量改）
+规则（深度比对第 78 轮增强）：
+1. 同时只能一个 in_progress（自动校验）
+2. completed 不允许回退到 pending（单向状态机）
+3. 测试没过不许标 completed
+4. 按依赖顺序排列
+5. 完成后立即更新（不要批量改）
+6. 返回带进度条 [█████░░░░░] 50% + 分类统计
 
 何时用：
-- 实现 3+ 步的功能（重构、迁移、修复杂 bug）
-- 用户给了明确的多点需求
-- plan 模式产出的计划，转成 todo 逐项执行
-
-何时不用：
-- 1-2 步的简单任务（直接做就行）
+- 3+ 步功能（重构、迁移、复杂 bug）
+- 用户给了多点需求
+- plan 计划转 todo 执行
+- /workflow 四阶段每阶段内部跟踪
 - 探索性任务（用 Task 子 agent）
 - 纯问答
 

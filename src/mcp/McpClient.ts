@@ -111,11 +111,20 @@ export async function connectMcpServer(
       transport = new StreamableHTTPClientTransport(new URL(config.url))
     }
   } else if (config.command) {
+    // 深度比对第 46 轮: stderr 累积上限（对标 Claude Code 64MB per server 修复）
+    // StdioClientTransport 内部 spawn 子进程，stderr 默认无限累积
+    // 用 stderr 管道 + 1MB cap 替代默认行为
+    const child = await import('node:child_process')
+    const { Readable } = await import('node:stream')
+    const MAX_STDERR = 1024 * 1024 // 1MB cap（Claude Code 用 64MB，我们更保守）
+
     transport = new StdioClientTransport({
       command: config.command,
       args: config.args ?? [],
       env: { ...process.env, ...config.env } as Record<string, string>,
-    })
+      // 深度比对第 46 轮: stderr 处理——捕获但限制累积（防内存泄漏）
+      stderr: 'pipe', // 显式管道（而非 inherit 无限累积）
+    } as ConstructorParameters<typeof StdioClientTransport>[0])
   } else {
     throw new Error(`MCP server "${name}" 配置无效：需要 command（stdio）或 url（sse/http）`)
   }
@@ -148,6 +157,22 @@ export async function connectMcpServer(
   ])
   const mcpTools = toolsResult.tools ?? []
   const tools = mcpTools.map((t) => convertMcpTool(name, t, client))
+
+  // 深度比对第 46 轮: stderr 累积监控（对标 Claude Code 64MB per server 修复）
+  const STDERR_CAP = 1024 * 1024 // 1MB
+  const stderrInterval = setInterval(() => {
+    try {
+      const t = transport as unknown as { _process?: { stderr?: NodeJS.ReadableStream & { readableLength?: number } } }
+      const proc = t._process
+      if (proc?.stderr && (proc.stderr.readableLength ?? 0) > STDERR_CAP) {
+        // stderr buffer 过大——读取并丢弃旧数据
+        const stream = proc.stderr as NodeJS.ReadableStream & { read: (n: number) => Buffer | null }
+        stream.read(STDERR_CAP - 512 * 1024) // 丢弃旧数据，保留末尾 512KB
+      }
+    } catch {
+      // transport 可能已关闭
+    }
+  }, 30000)
 
   return { name, client, transport, tools }
 }

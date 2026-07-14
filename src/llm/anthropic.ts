@@ -88,15 +88,17 @@ async function createWithRetry(
       if (signal.aborted) throw e
       const err = e as { status?: number; code?: string; headers?: { 'retry-after'?: string } }
       const is429 = err.status === 429
-      const isNetwork = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.code === 'ENOTFOUND'
-      // 只重试 429 和网络错误，其他（4xx 客户端错误）直接抛
-      if (!is429 && !isNetwork) throw e
+      // 深度比对第 12 轮: 5xx 服务端错误也重试
+      const is5xx = err.status && err.status >= 500 && err.status < 600
+      const isNetwork = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.code === 'ENOTFOUND' || err.code === 'EAI_AGAIN'
+      // 只重试可恢复错误：429 / 5xx / 网络；4xx 客户端错误（如 401 key 无效）直接抛
+      if (!is429 && !is5xx && !isNetwork) throw e
       if (attempt < 2) {
-        // 429 读 retry-after；网络错误指数退避 1s/2s
+        // 429 读 retry-after；5xx/网络指数退避 1s/2s/4s
         const delay = is429
           ? parseInt(err.headers?.['retry-after'] ?? '1') * 1000
-          : 1000 * (attempt + 1)
-        await new Promise((r) => setTimeout(r, delay))
+          : 1000 * Math.pow(2, attempt) // 1s, 2s
+        await new Promise((r) => setTimeout(r, Math.min(delay, 10000)))
       }
     }
   }
@@ -224,7 +226,21 @@ export async function* streamAnthropic(
     }
   } catch (e) {
     if (opts.signal.aborted) throw new DOMException('Aborted', 'AbortError')
-    yield { type: 'error', error: e as Error }
+    // 深度比对第 12 轮: 友好错误提示
+    const err = e as { status?: number; message?: string }
+    let friendly = err.message ?? String(e)
+    if (err.status === 401) {
+      friendly = `API key 无效或已过期。检查 ~/.fuckcode/config.json 的 apiKey，或设 ANTHROPIC_API_KEY 环境变量。`
+    } else if (err.status === 403) {
+      friendly = `API 访问被拒绝（403）。可能是 key 无权限、欠费、或 baseURL 配置错误。`
+    } else if (err.status === 404) {
+      friendly = `API 返回 404。检查 apiBaseUrl 和 provider 配置是否正确（MiniMax 等需设 provider=anthropic）。`
+    } else if (err.status === 429) {
+      friendly = `请求太频繁（429）。已自动重试 3 次仍被限流，请稍后再试。`
+    } else if (err.status && err.status >= 500) {
+      friendly = `API 服务端错误（${err.status}）。已自动重试 3 次仍失败，服务可能暂时不可用。`
+    }
+    yield { type: 'error', error: new Error(friendly) }
     return
   }
 

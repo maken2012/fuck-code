@@ -45,6 +45,24 @@ export class ToolExecutor {
     private readonly findTool: (name: string, tools: Tool[]) => Tool | undefined,
   ) {}
 
+  /**
+   * 格式化工具调用的摘要（给 UI 显示用）。
+   * Bash→command；Edit/Write/Read→file_path；Grep/Glob→pattern；其他→JSON 截断。
+   */
+  static formatToolSummary(toolName: string, input: unknown): string {
+    const i = (input ?? {}) as Record<string, unknown>
+    if (toolName === 'Bash') return String(i.command ?? '')
+    if (toolName === 'Edit' || toolName === 'Write' || toolName === 'Read') {
+      return String(i.file_path ?? '')
+    }
+    if (toolName === 'Grep' || toolName === 'Glob') return String(i.pattern ?? '')
+    try {
+      return JSON.stringify(input).slice(0, 100)
+    } catch {
+      return String(input)
+    }
+  }
+
   async *execute(
     toolUses: ToolUseRequest[],
     ctx: ExecutionContext,

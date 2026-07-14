@@ -130,22 +130,7 @@ export interface QueryLoopOpts {
   _hooksOverride?: HooksFile
 }
 
-// 给 UI 显示的 input 摘要：Bash→command；Edit/Write→file_path；其他→JSON 截断。
-// 不抛错（input 结构非预期时回退到 JSON 截断），永远返回字符串。
-function summarizeInput(toolName: string, input: unknown): string {
-  const i = (input ?? {}) as Record<string, unknown>
-  if (toolName === 'Bash') return String(i.command ?? '')
-  if (toolName === 'Edit' || toolName === 'Write' || toolName === 'Read') {
-    return String(i.file_path ?? '')
-  }
-  try {
-    return JSON.stringify(input).slice(0, 100)
-  } catch {
-    return String(input)
-  }
-}
-
-// askPermission 逻辑已移入 PermissionManager.createAskGenerator（统一权限交互入口）
+// summarizeInput 已移入 ToolExecutor.formatToolSummary（静态方法）
 
 export async function* queryLoop(
   opts: QueryLoopOpts,
@@ -408,7 +393,7 @@ export async function* queryLoop(
           continue
         }
         if (perm.decision === 'ask') {
-          const userDecision = yield* permManager.createAskGenerator(tu.name, tu.input, summarizeInput)
+          const userDecision = yield* permManager.createAskGenerator(tu.name, tu.input, ToolExecutor.formatToolSummary)
           if (userDecision === 'deny') {
             const content = `用户拒绝执行 ${tu.name}`
             toolResultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content, is_error: true })

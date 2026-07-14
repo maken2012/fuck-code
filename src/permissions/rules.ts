@@ -101,12 +101,68 @@ function extractContentField(toolName: string, input: unknown): string | undefin
   return undefined
 }
 
-// 通配符匹配
+// 深度比对第 52 轮: 规则编译缓存（对标 Claude Code 'rule matchers are now compiled once and cached'）
+// wildcardMatch 每次 new RegExp 很贵——编译一次缓存
+const regexCache = new Map<string, RegExp>()
+
+function getCompiledRegex(pattern: string): RegExp {
+  let re = regexCache.get(pattern)
+  if (!re) {
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+    re = new RegExp(`^${escaped}$`)
+    regexCache.set(pattern, re)
+  }
+  return re
+}
+
+// 深度比对第 52 轮: shadowed rule 检测（对标 Claude Code shadowedRuleDetection）
+// 启动时检测 allow/ask/deny 里的冗余规则（被更高优先级规则完全覆盖）
+export function detectShadowedRules(rules: {
+  allow: string[]
+  ask: string[]
+  deny: string[]
+}): string[] {
+  const warnings: string[] = []
+  const parsedDeny = rules.deny.map(parseRule)
+  const parsedAllow = rules.allow.map(parseRule)
+  const parsedAsk = rules.ask.map(parseRule)
+
+  // deny 规则里的 shadow：A 比 B 更宽泛且都在 deny → B 被 shadow
+  for (let i = 0; i < parsedDeny.length; i++) {
+    for (let j = 0; j < parsedDeny.length; j++) {
+      if (i === j) continue
+      const a = parsedDeny[i]!
+      const b = parsedDeny[j]!
+      // a 完全覆盖 b（同工具 + a 的 pattern 更宽泛）
+      if (a.tool === b.tool && a.contentPattern && b.contentPattern &&
+          a.contentPattern !== b.contentPattern &&
+          getCompiledRegex(a.contentPattern).test('')) {
+        // a 含 * 匹配一切 → b 被 shadow
+        if (a.contentPattern === '*' || a.contentPattern === '**') {
+          warnings.push(`deny 规则 "${rules.deny[j]}" 被 "${rules.deny[i]}" 覆盖`)
+        }
+      }
+    }
+  }
+
+  // allow 规则被 deny 覆盖
+  for (const a of parsedAllow) {
+    for (const d of parsedDeny) {
+      if (a.tool === d.tool && !d.contentPattern && !d.param) {
+        // deny 整个工具 → allow 该工具的任何子规则都无效
+        warnings.push(`allow 规则 "/${a.tool}" 被 deny "${d.tool}" 完全覆盖`)
+        break
+      }
+    }
+  }
+
+  return warnings
+}
+
+// 通配符匹配（使用编译缓存）
 export function wildcardMatch(pattern: string, value: string): boolean {
   if (!pattern.includes('*')) {
     return pattern === value
   }
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
-  const re = new RegExp(`^${escaped}$`)
-  return re.test(value)
+  return getCompiledRegex(pattern).test(value)
 }

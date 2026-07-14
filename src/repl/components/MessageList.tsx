@@ -2,6 +2,7 @@
 // 消息列表组件——纯渲染，消费 DisplayMessage 数组 + running 状态。
 // 从 Repl.tsx 拆出，职责单一。
 // 深度比对修复 #4: assistant 消息用 markdown 渲染（代码块高亮 + 列表 + 标题）
+// 深度比对第 60 轮: React.memo 优化——流式渲染时已定稿消息不重渲染（对标 Claude Code useDeferredValue）
 import React from 'react'
 import { Box, Text } from 'ink'
 import type { DisplayMessage } from '@/repl/MessageHistory.js'
@@ -12,7 +13,8 @@ export interface MessageListProps {
   running: boolean
 }
 
-export function MessageList({ messages, running }: MessageListProps) {
+// 深度比对第 60 轮: React.memo + 浅比较——流式更新最后一条时，前面的消息不重渲染
+function MessageListComponent({ messages, running }: MessageListProps) {
   return (
     <>
       {messages.map((m, i) => {
@@ -80,3 +82,11 @@ function safeRenderMarkdown(text: string): string {
     return text
   }
 }
+
+// 深度比对第 60 轮: React.memo 导出——浅比较 props，messages 数组引用变才重渲染
+export const MessageList = React.memo(MessageListComponent, (prev, next) => {
+  // 如果 messages 引用相同 + running 相同 → 跳过重渲染
+  if (prev.messages === next.messages && prev.running === next.running) return true
+  // 否则重渲染
+  return false
+})

@@ -1,9 +1,8 @@
 {
   "name": "fuckcode",
-  "version": "0.1.0",
+  "version": "1.12.0",
   "description": "原生中文交互的终端 AI 编码工具",
   "type": "module",
-  "private": true,
   "bin": {
     "fuckcode": "./bin/fuckcode.js",
     "fc": "./bin/fuckcode.js"
@@ -12,7 +11,11 @@
     "dev": "bun run src/cli.tsx",
     "start": "bun run bin/fuckcode.js",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "build": "bun build src/cli.tsx --compile --outfile fuckcode --target bun-darwin-arm64 --define process.env.NODE_ENV='production'",
+    "build:all": "bun run script/build-all.ts",
+    "link:global": "sudo ln -sf $(pwd)/bin/fuckcode.js /usr/local/bin/fuckcode && sudo ln -sf $(pwd)/bin/fuckcode.js /usr/local/bin/fc",
+    "install:binary": "bun run build && sudo cp fuckcode /usr/local/bin/fuckcode && sudo ln -sf /usr/local/bin/fuckcode /usr/local/bin/fc && echo 'fuckcode 已全局安装，运行 fuckcode 或 fc'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.111.0",
@@ -27,6 +30,7 @@
   "devDependencies": {
     "@types/bun": "1.2.0",
     "@types/react": "19.2.17",
+    "react-devtools-core": "^7.0.1",
     "typescript": "5.7.2"
   },
   "engines": {

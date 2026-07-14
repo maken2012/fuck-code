@@ -2,7 +2,7 @@
 
 > 原生中文交互的终端 AI 编码工具。目标是从需求到开发测试的完整流程都能在一个工具里完成。
 
-**当前状态：v1.10（231 tests）** — 全量推进完成。14 个工具，3 种 MCP transport，findRelevantMemories，sidechain transcript，worktree，diff 渲染。
+**当前状态：v1.11（238 tests）** — 学习 Claude Code 真实迭代：fallbackModel + /context + --safe-mode + /goal 目标驱动。14 工具，17 命令。
 
 ## 快速开始
 
@@ -149,6 +149,7 @@ bun run dev           # 启动 REPL
 | **v1.8 记忆优化** | findRelevantMemories 按相关性筛选 + sidechain transcript | ✅ |
 | **v1.9 生态扩展** | MCP 多 transport（sse/http）+ git worktree 工具 | ✅ |
 | **v1.10 体验打磨** | diff 渲染 + /diff 命令 + StatusLine 状态栏 | ✅ |
+| **v1.11 学 Claude Code** | fallbackModel 链 + /context + --safe-mode + /goal 目标驱动 | ✅ |
 | v1.1+ | MCP 客户端 / 插件系统 / TodoWrite 任务跟踪 | ⬜ |
 
 完整设计见 [MVP 设计文档](docs/superpowers/specs/2026-07-13-fuckcode-mvp-design.md)，M1 实现计划见 [M1 计划文档](docs/superpowers/plans/2026-07-13-fuckcode-m1-skeleton.md)。

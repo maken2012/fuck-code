@@ -165,3 +165,6 @@ export function attitudeFor(scene: keyof typeof SCENES | string): string {
 export function attitude(): string {
   return attitudeFor('idle')
 }
+
+// 深度比对第 96 轮: 补充更多暴躁文案
+// 在已有 SCENES 基础上不追加（文件已够大），只更新 TAGLINE

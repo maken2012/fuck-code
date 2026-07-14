@@ -15,7 +15,14 @@ const program = new Command()
   .option('--api-key <key>', '覆盖 config.json 的 apiKey（建议用环境变量）')
   .option('--api-base-url <url>', '覆盖 config.json 的 apiBaseUrl（第三方兼容中转）')
   .option('--plan', '只读分析模式（不修改任何文件，适合需求分析/代码审查）')
+  .option('--safe-mode', '安全模式：禁用所有定制（AGENTS.md/memory/hooks/MCP/自定义命令/动态工具），排查问题用')
   .action(async (prompt, opts) => {
+    const safeMode = opts.safeMode ?? false
+    if (safeMode) {
+      process.stderr.write('\x1b[33m⚠ 安全模式：已禁用 AGENTS.md / 记忆 / hooks / MCP / 自定义命令 / 动态工具\x1b[0m\n')
+      // 用环境变量通知各模块跳过加载
+      process.env.FUCKCODE_SAFE_MODE = '1'
+    }
     const common = {
       modelOverride: opts.model,
       apiKeyOverride: opts.apiKey,

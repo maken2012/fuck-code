@@ -22,6 +22,7 @@ import { listCheckpoints, restoreCheckpoint } from '@/tools/checkpoint.js'
 import type { Checkpoint } from '@/tools/checkpoint.js'
 import { loadPromptHistory, appendPromptHistory } from '@/services/PromptHistory.js'
 import { diffText, formatDiff } from '@/utils/diff.js'
+import { estimateTokens } from '@/utils/tokens.js'
 import { readFile } from 'node:fs/promises'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -460,6 +461,59 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     setHistory((h) => [...h, { role: 'assistant' as const, text: ok ? `✓ 已恢复 ${target.originalPath}` : `❌ 恢复失败` }])
   }
 
+  // v1.11: /context 分析当前上下文 token 占用（各类内容分别占多少）
+  async function handleContextCommand(): Promise<void> {
+    const history = chatHistoryRef.current
+    if (history.length === 0) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '当前无对话上下文' }])
+      return
+    }
+    // 分类统计：user 文本 / assistant 文本 / tool_result / 结构化 block
+    let userTokens = 0
+    let assistantTokens = 0
+    let toolResultTokens = 0
+    for (const msg of history) {
+      if (typeof msg.content === 'string') {
+        const t = estimateTokens(msg.content)
+        if (msg.role === 'user') userTokens += t
+        else assistantTokens += t
+      } else {
+        for (const block of msg.content) {
+          if (block.type === 'text') {
+            const t = estimateTokens(block.text)
+            if (msg.role === 'user') userTokens += t
+            else assistantTokens += t
+          } else if (block.type === 'tool_result') {
+            toolResultTokens += estimateTokens(block.content)
+          } else if (block.type === 'tool_use') {
+            assistantTokens += estimateTokens(JSON.stringify(block.input))
+          }
+        }
+      }
+    }
+    const total = userTokens + assistantTokens + toolResultTokens
+    const config = configRef.current
+    const contextWindow = config?.contextWindow ?? 200000
+    const pct = Math.round((total / contextWindow) * 100)
+    // 建议
+    const tips: string[] = []
+    if (toolResultTokens > total * 0.4) tips.push('• 工具结果占比高（>40%），考虑用 microCompact 压缩旧结果')
+    if (pct > 80) tips.push('• 上下文已用 >80%，即将触发 autoCompact')
+    if (assistantTokens > total * 0.5) tips.push('• assistant 回复占比高，长回复可考虑精简')
+
+    setHistory((h) => [...h, {
+      role: 'assistant' as const,
+      text: `上下文占用分析（共 ${total} tokens / ${contextWindow}，${pct}%）：
+
+  • 用户输入：${userTokens} tokens（${Math.round(userTokens / total * 100) || 0}%）
+  • 模型回复：${assistantTokens} tokens（${Math.round(assistantTokens / total * 100) || 0}%）
+  • 工具结果：${toolResultTokens} tokens（${Math.round(toolResultTokens / total * 100) || 0}%）
+  • 消息数：${history.length}
+
+${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健康。'}`,
+    }])
+  }
+
   // v1.10: /diff 查看本会话改动（基于 checkpoint 对比当前文件）
   async function handleDiffCommand(): Promise<void> {
     const checkpoints = await listCheckpoints(process.cwd())
@@ -701,6 +755,14 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         if (!running) {
           setInput('')
           void handleDiffCommand()
+        }
+        return
+      }
+      // v1.11: /context 分析上下文 token 占用
+      if (text === '/context') {
+        if (!running) {
+          setInput('')
+          void handleContextCommand()
         }
         return
       }

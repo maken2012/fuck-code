@@ -17,6 +17,7 @@ export interface BuildSystemPromptOpts {
 // 缓存已加载的指令（启动期加载一次，避免每次 queryLoop 都读文件）
 let cachedInstructions: string | null | undefined
 async function getInstructions(): Promise<string | null> {
+  if (process.env.FUCKCODE_SAFE_MODE === '1') return null // safe-mode 跳过 AGENTS.md
   if (cachedInstructions === undefined) {
     cachedInstructions = await loadInstructions(process.cwd()).catch(() => null)
   }
@@ -63,8 +64,8 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
   const instructionSection = instructions ? `\n\n# 项目指令（AGENTS.md）\n以下指令由项目提供，优先级高于上面的默认约定：\n\n${instructions}` : ''
 
   // v1.5: 记忆注入（跨会话持久化的偏好/约定）
-  // v1.5+v1.8: 记忆注入。用 findRelevantMemories 按 userQuery 筛选（避免全量爆上下文）
-  const allMemories = await loadMemories(process.cwd()).catch(() => [])
+  // v1.5+v1.8: 记忆注入。safe-mode 跳过。
+  const allMemories = process.env.FUCKCODE_SAFE_MODE === '1' ? [] : await loadMemories(process.cwd()).catch(() => [])
   const memories = opts?.userQuery ? findRelevantMemories(allMemories, opts.userQuery) : allMemories
   const memorySection = formatMemoriesForPrompt(memories)
 

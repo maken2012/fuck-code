@@ -165,7 +165,8 @@ export async function* queryLoop(
   const sessionApi = opts._sessionOverride ?? defaultSessionApi
 
   // v1.3: 加载 hooks 配置（.fuckcode/hooks.json）
-  const hooks: HooksFile = opts._hooksOverride ?? await loadHooks(opts.cwd).catch(() => ({}))
+  // v1.3+v1.11: 加载 hooks（safe-mode 跳过）
+  const hooks: HooksFile = opts._hooksOverride ?? (process.env.FUCKCODE_SAFE_MODE === '1' ? {} : await loadHooks(opts.cwd).catch(() => ({})))
 
   // UserPromptSubmit hook：用户提交 prompt 时触发，可注入额外上下文
   const promptHookResult = await triggerHooks('UserPromptSubmit', { prompt: opts.userInput }, hooks, opts.cwd)

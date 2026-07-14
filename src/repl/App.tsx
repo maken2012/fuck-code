@@ -32,6 +32,8 @@ export async function startRepl(opts: StartReplOpts = {}): Promise<void> {
 
   // v1.4: 连接 MCP servers（如有 .fuckcode/mcp.json），失败不阻塞启动
   let mcpToolsCount = 0
+  // v1.11: safe-mode 跳过 MCP
+  if (process.env.FUCKCODE_SAFE_MODE !== '1') {
   try {
     const { loadMcpConfig, connectAllMcpServers } = await import('@/mcp/McpClient.js')
     const mcpConfig = await loadMcpConfig(process.cwd())
@@ -50,6 +52,7 @@ export async function startRepl(opts: StartReplOpts = {}): Promise<void> {
   } catch (e) {
     process.stderr.write(`\x1b[33m⚠ MCP 初始化失败（忽略）: ${String(e)}\x1b[0m\n`)
   }
+  } // end if !safe-mode
 
   // Ink 的 useInput 需要 TTY（setRawMode）。非 TTY 环境（CI、管道、重定向 stdin）
   // 给出友好提示而非 Ink 的红色错误栈。

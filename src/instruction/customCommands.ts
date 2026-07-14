@@ -64,6 +64,13 @@ export function extractHints(template: string): string | undefined {
 }
 
 // 从 cwd/.fuckcode/commands/ 加载所有自定义命令
+// 深度比对第 51 轮: 冲突检测——与内置命令同名时警告（对标 opencode plugin conflict detection）
+const BUILTIN_COMMANDS = new Set([
+  'workflow', 'goal', 'plan', 'context', 'diff', 'rewind', 'cost',
+  'model', 'config', 'less-perms', 'skills', 'reload-skills', 'init',
+  'agents', 'sessions', 'resume', 'clear', 'help', 'exit', 'quit',
+])
+
 export async function loadCustomCommands(cwd: string): Promise<CustomCommand[]> {
   const commandsDir = resolve(cwd, '.fuckcode', 'commands')
   try {
@@ -81,6 +88,11 @@ export async function loadCustomCommands(cwd: string): Promise<CustomCommand[]> 
       const fullPath = resolve(commandsDir, file)
       try {
         const content = await readFile(fullPath, 'utf8')
+        // 深度比对第 51 轮: 与内置命令同名时警告
+        if (BUILTIN_COMMANDS.has(name)) {
+          process.stderr.write(`[WARN] 自定义命令 ${name}.md 与内置命令同名，内置优先。换个文件名。\n`)
+          continue
+        }
         commands.push(parseCommandFile(content, name, fullPath))
       } catch {
         // 单个文件读失败跳过

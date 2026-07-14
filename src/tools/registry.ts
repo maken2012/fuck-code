@@ -33,14 +33,29 @@ export function getAllTools(): Tool[] {
   ]
 }
 
-// v1.1: 内置工具 + 动态加载（.fuckcode/tools/*.ts）
-// 动态工具按名字去重（内置优先）
-export async function getAllToolsAsync(cwd: string): Promise<Tool[]> {
+// v1.1+: 内置工具 + 动态加载（.fuckcode/tools/*.ts）
+// 动态工具按名字去重（内置优先，对标 opencode plugin dependency enforcement）
+export async function getAllToolsAsync(cwd: string): Promise<{ tools: Tool[]; warnings: string[] }> {
   const builtin = getAllTools()
   const dynamic = await loadDynamicTools(cwd)
   const builtinNames = new Set(builtin.map((t) => t.name))
-  const deduped = dynamic.filter((t) => !builtinNames.has(t.name))
-  return [...builtin, ...deduped]
+  const warnings: string[] = []
+  // 深度比对第 51 轮: 冲突检测（对标 opencode plugin disable-chain）
+  const deduped: Tool[] = []
+  const seenNames = new Set<string>()
+  for (const t of dynamic) {
+    if (builtinNames.has(t.name)) {
+      warnings.push(`动态工具 ${t.name} 与内置工具同名，已跳过（内置优先）`)
+      continue
+    }
+    if (seenNames.has(t.name)) {
+      warnings.push(`动态工具 ${t.name} 重复定义，已跳过后一个`)
+      continue
+    }
+    seenNames.add(t.name)
+    deduped.push(t)
+  }
+  return { tools: [...builtin, ...deduped], warnings }
 }
 
 // 按名字查找工具

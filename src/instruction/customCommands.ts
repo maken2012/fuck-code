@@ -61,6 +61,7 @@ export async function loadCustomCommands(cwd: string): Promise<CustomCommand[]> 
 }
 
 // 渲染 template：替换 $ARGUMENTS / $1 $2 ...
+// 深度比对第 37 轮: 增强模板——支持 $ARGUMENTS/$N + !命令 shell 执行（对标 opencode）
 export function renderTemplate(template: string, args: string): string {
   const parts = args.split(/\s+/).filter(Boolean)
   let result = template.replace(/\$ARGUMENTS/g, args)
@@ -69,5 +70,18 @@ export function renderTemplate(template: string, args: string): string {
   })
   // 未提供的 $N 替换为空
   result = result.replace(/\$\d+/g, '')
+
+  // 深度比对第 37 轮: !命令 shell 执行（对标 opencode !`command` 语法）
+  // 匹配 !`command` 或 !``command`` 形式，执行命令并替换为输出
+  result = result.replace(/!`([^`]+)`/g, (_, cmd: string) => {
+    try {
+      const { execSync } = require('node:child_process')
+      const output = execSync(cmd, { encoding: 'utf8', timeout: 10000, cwd: process.cwd() })
+      return output.trim()
+    } catch {
+      return `[命令执行失败: ${cmd}]`
+    }
+  })
+
   return result
 }

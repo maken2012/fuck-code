@@ -5,6 +5,7 @@ import type { Tool } from '@/tools/Tool.js'
 import type { ToolContext } from '@/tools/Tool.js'
 import { checkPermission } from '@/permissions/decision.js'
 import type { PermissionMode } from '@/permissions/modes.js'
+import type { QueryEvent } from '@/agent/types.js'
 
 export type PermissionUserDecision = 'allow' | 'deny'
 export type PermissionDecision = 'allow' | 'ask' | 'deny'
@@ -70,5 +71,35 @@ export class PermissionManager {
       config.permissionMode ?? 'default',
       config.permissions ?? { allow: [], ask: [], deny: [] },
     )
+  }
+
+  /**
+   * 创建 ask 权限交互的 async generator（封装 yield permission_request + await decision）。
+   * 从 queryLoop 的 askPermission helper 移入，统一权限交互入口。
+   *
+   * 工作流：
+   * 1. 创建 Promise + resolveFn
+   * 2. yield permission_request 事件（generator 暂停，外层 Repl 拿到事件渲染弹窗）
+   * 3. 用户按 y/n 后调 resolveFn(decision)，promise resolve
+   * 4. generator 恢复，return decision
+   */
+  async *createAskGenerator(
+    toolName: string,
+    input: unknown,
+    summarizeFn: (toolName: string, input: unknown) => string,
+  ): AsyncGenerator<QueryEvent, PermissionUserDecision> {
+    let resolveFn!: (d: PermissionUserDecision) => void
+    const decisionPromise = new Promise<PermissionUserDecision>((r) => {
+      resolveFn = r
+    })
+    const inputSummary = summarizeFn(toolName, input)
+    yield {
+      type: 'permission_request',
+      tool: toolName,
+      input,
+      inputSummary,
+      resolve: resolveFn,
+    }
+    return await decisionPromise
   }
 }

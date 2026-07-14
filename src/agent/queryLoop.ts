@@ -145,33 +145,7 @@ function summarizeInput(toolName: string, input: unknown): string {
   }
 }
 
-// 权限询问 async generator helper（yield* 协调）。
-//   1. 先把 resolveFn 取出来（promise 创建时已绑好）
-//   2. yield permission_request 事件出去 —— 此时 generator 暂停，外层 Repl 拿到事件
-//   3. Repl 显示弹窗、用户按 y/n 后调 resolveFn(decision) —— promise resolve
-//   4. generator 恢复，return decision
-// 关键：yield 出去后 generator 真正暂停（for await 消费者侧不 next 就不会继续），
-// 所以 await decisionPromise 必然在 resolve 被调用之后才完成。
-async function* askPermission(
-  toolName: string,
-  input: unknown,
-): AsyncGenerator<QueryEvent, PermissionUserDecision> {
-  let resolveFn!: (d: PermissionUserDecision) => void
-  const decisionPromise = new Promise<PermissionUserDecision>(
-    (r) => {
-      resolveFn = r
-    },
-  )
-  const inputSummary = summarizeInput(toolName, input)
-  yield {
-    type: 'permission_request',
-    tool: toolName,
-    input,
-    inputSummary,
-    resolve: resolveFn,
-  }
-  return await decisionPromise
-}
+// askPermission 逻辑已移入 PermissionManager.createAskGenerator（统一权限交互入口）
 
 export async function* queryLoop(
   opts: QueryLoopOpts,
@@ -434,7 +408,7 @@ export async function* queryLoop(
           continue
         }
         if (perm.decision === 'ask') {
-          const userDecision = yield* askPermission(tu.name, tu.input)
+          const userDecision = yield* permManager.createAskGenerator(tu.name, tu.input, summarizeInput)
           if (userDecision === 'deny') {
             const content = `用户拒绝执行 ${tu.name}`
             toolResultBlocks.push({ type: 'tool_result', tool_use_id: tu.id, content, is_error: true })

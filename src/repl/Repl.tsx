@@ -527,6 +527,41 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     setHistory((h) => [...h, { role: 'assistant' as const, text: ok ? `✓ 已恢复 ${target.originalPath}` : `❌ 恢复失败` }])
   }
 
+  // v1.12: /less-permission-prompts 分析历史并生成 allowlist 建议
+  async function handleLessPermissionsCommand(): Promise<void> {
+    // 从 inputHistoryRef 读历史 prompt（找含 Bash 命令意图的）
+    // 简化版：直接建议常见只读 Bash 模式 + 扫描 checkpoint 看改过哪些文件
+    const checkpoints = await listCheckpoints(process.cwd())
+    const changedFiles = new Set(checkpoints.map((c) => c.originalPath.replace(process.cwd() + '/', '')))
+
+    // 常见安全的只读 Bash 命令模式（用户大概率频繁用）
+    const commonSafe = [
+      { pattern: 'git status', desc: '查看 git 状态' },
+      { pattern: 'git diff*', desc: '查看改动' },
+      { pattern: 'git log*', desc: '查看提交历史' },
+      { pattern: 'git branch*', desc: '查看分支' },
+      { pattern: 'ls*', desc: '列目录' },
+      { pattern: 'cat*', desc: '查看文件' },
+      { pattern: 'echo*', desc: '输出文本' },
+      { pattern: 'node --version', desc: '查看 node 版本' },
+      { pattern: 'bun --version', desc: '查看 bun 版本' },
+    ]
+
+    const suggestions = commonSafe.map((s) => `  "Bash(${s.pattern})"  // ${s.desc}`).join('\n')
+    const filesNote = changedFiles.size > 0
+      ? `\n\n你常改的文件：\n${[...changedFiles].slice(0, 10).map((f) => `  ${f}`).join('\n')}\n可考虑加 "Edit(${[...changedFiles][0]?.split('/')[0]}/**)" 减少弹窗`
+      : ''
+
+    setHistory((h) => [...h, {
+      role: 'assistant' as const,
+      text: `减少权限弹窗的建议（加到 ~/.fuckcode/config.json 的 permissions.allow）：
+
+${suggestions}${filesNote}
+
+复制需要的条目到 config.json 即可。加完后这些命令不再弹窗确认。`,
+    }])
+  }
+
   // v1.11: /context 分析当前上下文 token 占用（各类内容分别占多少）
   async function handleContextCommand(): Promise<void> {
     const history = chatHistoryRef.current
@@ -832,6 +867,14 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         }
         return
       }
+      // v1.12: /less-permission-prompts 生成 allowlist 建议
+      if (text === '/less-permission-prompts' || text === '/less-perms') {
+        if (!running) {
+          setInput('')
+          void handleLessPermissionsCommand()
+        }
+        return
+      }
       // v1.11: /goal <条件> 目标驱动持续工作（跨轮次直到达成）
       if (text.startsWith('/goal ')) {
         const goal = text.slice('/goal '.length).trim()
@@ -882,6 +925,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
 /workflow <需求> — ★ 自动走"理解→实现→验证→回顾"四阶段完整工作流
 /goal <条件> — 目标驱动：跨轮次持续工作直到条件达成
 /context — 分析上下文 token 占用 + 优化建议
+/less-perms — 生成 allowlist 建议减少权限弹窗
 /rewind [N] — 回滚文件到 Edit/Write 前的 checkpoint
 /diff — 查看本会话所有改动（diff 格式）
 /init — 生成 AGENTS.md 模板（项目级 agent 行为约定）

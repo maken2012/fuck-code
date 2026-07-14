@@ -10,6 +10,7 @@ import { configPath } from '@/services/Paths.js'
 // === Zod Schema（spec 5.4 节） ===
 export const ConfigSchema = z.object({
   model: z.string().default('claude-sonnet-4-5-20250929'),
+  fallbackModels: z.array(z.string()).default([]).describe('主模型过载/429 时按序尝试的备用模型（最多 3 个）'),
   apiKey: z.string().optional(),
   apiBaseUrl: z.string().optional().describe('Anthropic 兼容 API 的 baseURL（第三方中转/代理）'),
   permissions: z

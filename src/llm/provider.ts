@@ -81,3 +81,59 @@ export async function* streamMessage(opts: StreamOpts): AsyncGenerator<LlmEvent>
       return
   }
 }
+
+// v1.11: fallbackModel 链。主模型 429/overloaded 时按序尝试备用模型。
+// 检测：streamMessage 第一个事件若是 error 且 message 含 429/overloaded/rate_limit，切下一个。
+export async function* streamMessageWithFallback(
+  opts: StreamOpts & { fallbackModels?: string[]; _streamOverride?: (o: StreamOpts) => AsyncGenerator<LlmEvent> },
+): AsyncGenerator<LlmEvent> {
+  const streamFn = opts._streamOverride ?? streamMessage
+  const models = [opts.model, ...(opts.fallbackModels ?? [])]
+  let lastError: LlmEvent | null = null
+
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i]!
+    if (i > 0) {
+      // 通知上层正在切换（作为 text 事件，用户可见）
+      yield { type: 'text', textDelta: `\n\n[主模型过载，切换到备用模型 ${model}...]\n\n` }
+    }
+
+    let gotRealEvent = false // 是否已收到非 error 事件（说明连接成功）
+    const buffer: LlmEvent[] = [] // 缓存首个 error 后的事件（如果成功则重放）
+
+    try {
+      for await (const event of streamFn({ ...opts, model })) {
+        if (event.type === 'error' && !gotRealEvent) {
+          // 首事件就是 error——可能是 429/overloaded
+          const msg = event.error.message.toLowerCase()
+          const isOverload = msg.includes('429') || msg.includes('overload') || msg.includes('rate_limit') || msg.includes('rate limit') || msg.includes('too many requests') || msg.includes('503')
+          if (isOverload && i < models.length - 1) {
+            lastError = event
+            break // 试下一个 model
+          }
+          // 非 overload 错误或最后一个 model——直接传播
+          yield event
+          return
+        }
+        gotRealEvent = true
+        buffer.push(event)
+      }
+
+      // 如果走到这里且 gotRealEvent，说明这个 model 成功了——重放 buffer
+      if (gotRealEvent) {
+        for (const e of buffer) yield e
+        return
+      }
+    } catch (e) {
+      if (i < models.length - 1) {
+        lastError = { type: 'error', error: e as Error }
+        continue
+      }
+      yield { type: 'error', error: e as Error }
+      return
+    }
+  }
+
+  // 所有 model 都失败
+  yield lastError ?? { type: 'error', error: new Error('所有模型（含备用）均失败') }
+}

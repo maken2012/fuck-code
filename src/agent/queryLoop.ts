@@ -27,7 +27,7 @@
 import type { ChatMessage, ContentBlock, LlmEvent } from '@/llm/types.js'
 import type { QueryEvent, PermissionUserDecision } from '@/agent/types.js'
 import type { Tool } from '@/tools/Tool.js'
-import { streamMessage } from '@/llm/provider.js'
+import { streamMessage, streamMessageWithFallback } from '@/llm/provider.js'
 import { findTool, toolsToAnthropicFormat } from '@/tools/registry.js'
 import { checkPermission } from '@/permissions/decision.js'
 import type { PermissionMode } from '@/permissions/modes.js'
@@ -87,6 +87,8 @@ export interface QueryLoopOpts {
   apiKey?: string
   /** M6：第三方 Anthropic 兼容 API 的 baseURL（中转/代理） */
   apiBaseUrl?: string
+  /** v1.11：主模型过载/429 时按序尝试的备用模型 */
+  fallbackModels?: string[]
   /** M3：工作目录（工具执行需要） */
   cwd: string
   /** M3：可用工具列表（不传则禁用工具，退化为 M2 单轮） */
@@ -192,10 +194,10 @@ export async function* queryLoop(
   // 注意：若触发了 autoCompact，新增队列要重置（compact 已落盘 boundary）。
   let pendingPersist: ChatMessage[] = [userMessage]
 
-  // 选 LLM stream 函数（测试用 override，生产用 streamMessage 支持多 provider）
+  // 选 LLM stream 函数（测试用 override；生产用 streamMessageWithFallback 支持 fallback 模型链）
   const streamFn =
     opts._llmOverride ??
-    (streamMessage as (o: object) => AsyncGenerator<LlmEvent>)
+    (streamMessageWithFallback as unknown as (o: object) => AsyncGenerator<LlmEvent>)
 
   // M5：autoCompact 阈值（默认 200000 contextWindow）
   const contextWindow = opts.contextWindow ?? DEFAULT_CONTEXT_WINDOW
@@ -269,6 +271,7 @@ export async function* queryLoop(
         signal: opts.signal,
         apiKey: opts.apiKey,
         ...(opts.apiBaseUrl ? { apiBaseUrl: opts.apiBaseUrl } : {}),
+        ...(opts.fallbackModels ? { fallbackModels: opts.fallbackModels } : {}),
         systemCacheable: true, // M6: 启用 prompt cache，system 静态段跨轮命中
       }
       if (hasTools) {

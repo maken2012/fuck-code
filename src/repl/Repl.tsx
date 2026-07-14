@@ -82,6 +82,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     model: string
     apiKey?: string
     apiBaseUrl?: string
+    fallbackModels?: string[]
     maxTokens: number
     contextWindow: number
     permissionMode: PermissionMode
@@ -101,6 +102,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           model: initialModel ?? c.value.model,
           apiKey: initialApiKey ?? c.value.apiKey,
           apiBaseUrl: initialApiBaseUrl ?? c.value.apiBaseUrl,
+          fallbackModels: c.value.fallbackModels,
           maxTokens: c.value.maxTokens,
           contextWindow: c.value.contextWindow,
           permissionMode: c.value.permissionMode,
@@ -155,6 +157,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         signal: ac.signal,
         apiKey: config.apiKey,
         ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+        ...(config.fallbackModels ? { fallbackModels: config.fallbackModels } : {}),
         cwd: process.cwd(),
         tools: getAllTools(),
         // M4：传权限模式 + 规则给 queryLoop，工具执行前调 checkPermission
@@ -304,6 +307,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         signal: ac.signal,
         apiKey: config.apiKey,
         ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+        ...(config.fallbackModels ? { fallbackModels: config.fallbackModels } : {}),
         cwd: process.cwd(),
         tools: getAllTools(),
         permissionMode: 'plan', // 只读，写工具被 deny

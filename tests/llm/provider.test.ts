@@ -85,3 +85,73 @@ test('streamMessage：Anthropic 模型仍走 anthropic provider', async () => {
   }
   expect(out).toEqual(['claude回复'])
 })
+
+
+// v1.11: fallbackModel 链
+test('streamMessageWithFallback：主模型 429 切备用', async () => {
+  const { streamMessageWithFallback } = await import('@/llm/provider.js')
+  let callCount = 0
+  const mockStream = async function* (): AsyncGenerator<{ type: string; textDelta?: string; error?: Error; stopReason?: string }> {
+    callCount++
+    if (callCount === 1) {
+      yield { type: 'error', error: new Error('429 rate_limit_exceeded') }
+      return
+    }
+    yield { type: 'text', textDelta: '备用回复' }
+    yield { type: 'done', stopReason: 'end_turn' }
+  }
+  const events: { type: string; textDelta?: string }[] = []
+  for await (const e of streamMessageWithFallback({
+    model: 'primary',
+    fallbackModels: ['backup'],
+    system: 's',
+    messages: [],
+    signal: new AbortController().signal,
+    _streamOverride: mockStream as never,
+  } as never)) {
+    events.push(e as { type: string; textDelta?: string })
+  }
+  expect(callCount).toBe(2)
+  expect(events.some((e) => e.type === 'text' && e.textDelta?.includes('切换到备用模型'))).toBe(true)
+  expect(events.some((e) => e.type === 'text' && e.textDelta === '备用回复')).toBe(true)
+})
+
+test('streamMessageWithFallback：无 fallback 时主错误直接传播', async () => {
+  const { streamMessageWithFallback } = await import('@/llm/provider.js')
+  const mockStream = async function* (): AsyncGenerator<{ type: string; error: Error }> {
+    yield { type: 'error', error: new Error('429 overloaded') }
+  }
+  const events: { type: string }[] = []
+  for await (const e of streamMessageWithFallback({
+    model: 'only',
+    system: 's',
+    messages: [],
+    signal: new AbortController().signal,
+    _streamOverride: mockStream as never,
+  } as never)) {
+    events.push(e as { type: string })
+  }
+  expect(events.some((e) => e.type === 'error')).toBe(true)
+})
+
+test('streamMessageWithFallback：非 overload 错误不切备用', async () => {
+  const { streamMessageWithFallback } = await import('@/llm/provider.js')
+  let callCount = 0
+  const mockStream = async function* (): AsyncGenerator<{ type: string; error: Error }> {
+    callCount++
+    yield { type: 'error', error: new Error('invalid_api_key') }
+  }
+  const events: { type: string }[] = []
+  for await (const e of streamMessageWithFallback({
+    model: 'primary',
+    fallbackModels: ['backup'],
+    system: 's',
+    messages: [],
+    signal: new AbortController().signal,
+    _streamOverride: mockStream as never,
+  } as never)) {
+    events.push(e as { type: string })
+  }
+  expect(callCount).toBe(1)
+  expect(events.some((e) => e.type === 'error')).toBe(true)
+})

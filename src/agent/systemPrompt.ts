@@ -35,6 +35,11 @@ export async function preloadInstructions(): Promise<void> {
 }
 
 export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<string> {
+  // === 深度比对第 15 轮: system prompt 分段缓存 ===
+  // 静态段（身份+原则+安全+工具说明）：跨轮不变，可缓存
+  // 动态段（AGENTS.md+记忆+skill+环境信息）：每轮可能变，不缓存
+  // Anthropic API 允许 system 是 TextBlockParam[] 数组，每块独立设 cache_control
+
   const base = `你叫 fuckcode，一个脾气暴躁、嘴上不饶人但活儿干得漂亮的终端 AI 编码助手。
 
 你的性格：消极、烦躁、爱爆粗口，但对技术问题认真负责。像那种被屎山代码折磨了十年、看什么都不顺眼但还是会帮你把活干完的老程序员。
@@ -69,12 +74,13 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
 # 编码约定
 - 改动遵循现有代码风格（命名、缩进、注释密度）
 - 给出的代码要能直接用，不要省略关键部分用 "..." 占位
-- 运行测试或 lint 用 Bash 工具，不要假设结果
+- 运行测试或 lint 用 Bash 工具，不要假设结果`
 
-# 当前环境
-- 工作目录：${process.cwd()}
-- 操作系统：${process.platform}
-- 运行时：Bun ${Bun.version}`
+  // === 动态段（每轮可能变化）===
+  const dynamicParts: string[] = []
+
+  // 当前环境（cwd 可能变）
+  dynamicParts.push(`# 当前环境\n- 工作目录：${process.cwd()}\n- 操作系统：${process.platform}\n- 运行时：Bun ${Bun.version}`)
 
   // v0.3: AGENTS.md 指令文件（如有）
   const instructions = await getInstructions()
@@ -96,5 +102,14 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
   const allSkills = process.env.FUCKCODE_SAFE_MODE === '1' ? [] : await loadSkills(process.cwd()).catch(() => [])
   const skillSection = formatSkillsForPrompt(allSkills)
 
-  return base + instructionSection + memorySection + skillSection + toolSection
+  // 动态段拼入 AGENTS.md + 记忆 + skill
+  if (instructions) dynamicParts.push(`# 项目指令（AGENTS.md）\n${instructions}`)
+  if (memorySection) dynamicParts.push(memorySection.trim())
+  if (skillSection) dynamicParts.push(skillSection.trim())
+
+  // 工具说明（静态段一部分——工具列表不频繁变化，拼入 base 缓存）
+  const toolsInBase = toolSection ? toolSection : ''
+
+  // 最终：静态段（base + 工具说明，可缓存） + 动态段（环境/指令/记忆/skill，不缓存）
+  return base + toolsInBase + '\n\n' + dynamicParts.map((p) => `\n${p}`).join('')
 }

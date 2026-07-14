@@ -50,6 +50,8 @@ export function findTool(name: string, tools: Tool[]): Tool | undefined {
 
 // 转成 Anthropic API 的 tools 参数格式（name / description / input_schema）
 export function toolsToAnthropicFormat(tools: Tool[]): object[] {
+  // 深度比对第 15 轮: 工具顺序必须稳定（cache 友好）
+  // 内置工具作为连续前缀，MCP/动态工具追加在后（Claude Code 同策略）
   return tools.map((t) => ({
     name: t.name,
     description: t.prompt,

@@ -54,21 +54,26 @@ function isPrivateUrl(urlStr: string): boolean {
 export const WebFetchTool = buildTool<WebFetchInputType>({
   name: 'WebFetch',
   description: '抓取 URL 内容转成文本',
-  prompt: `抓取一个 URL 的内容，转成纯文本返回。用于：
-- 读取文档页面
-- 读取 GitHub 文件/issue 的内容
-- 读取 WebSearch 找到的页面
+  prompt: `抓取一个 URL 的内容，转成纯文本返回。
 
 参数：
 - url（必填）：完整 URL（含 http:// 或 https://）
 - max_length（可选）：返回文本最大字符数，默认 10000
 
-安全限制：
-- 拒绝内网地址（localhost / 192.168.* / 10.* / 169.254.169.254 等），防 SSRF
+安全限制（深度比对第 80 轮增强）：
+- SSRF 全面防护（IPv4 内网 + IPv6 本地 + 云元数据 + 非 http 协议）
+- 拒绝 file:// ftp:// gopher:// 等非 HTTP 协议
 - 超时 15 秒
-- 自动去 script/style/nav，只留正文
+- 自动去 script/style/nav/footer，只留正文
+- GitHub 文件建议用 raw.githubusercontent.com URL
 
-注意：GitHub 上的公开文件，用 raw.githubusercontent.com URL 抓原始内容效果更好。`,
+用途：
+- 读取文档页面（MDN/官方 docs）
+- 读取 GitHub 文件/issue
+- 读取 WebSearch 找到的页面
+- 验证 API 返回内容
+
+注意：本地代码相关的问题用 Read/Grep/Glob，不要用 WebFetch。`,
   inputSchema: WebFetchInput,
   jsonSchema: {
     type: 'object',

@@ -6,6 +6,7 @@
 import type { Tool } from '@/tools/Tool.js'
 import { loadInstructions } from '@/instruction/agentsMd.js'
 import { loadMemories, formatMemoriesForPrompt, findRelevantMemories } from '@/instruction/memory.js'
+import { loadSkills, formatSkillsForPrompt } from '@/instruction/skills.js'
 
 export interface BuildSystemPromptOpts {
   /** M3：可用工具列表。每个工具的 prompt 会拼进 system prompt 末尾。 */
@@ -75,5 +76,9 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
         .join('\n\n')}`
     : ''
 
-  return base + instructionSection + memorySection + toolSection
+  // v1.12: Skill 系统（按需加载的领域知识，只注入 name+description）
+  const allSkills = process.env.FUCKCODE_SAFE_MODE === '1' ? [] : await loadSkills(process.cwd()).catch(() => [])
+  const skillSection = formatSkillsForPrompt(allSkills)
+
+  return base + instructionSection + memorySection + skillSection + toolSection
 }

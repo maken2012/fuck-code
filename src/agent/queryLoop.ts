@@ -33,6 +33,7 @@ import { ToolExecutor } from '@/agent/ToolExecutor.js'
 import type { ToolUseRequest } from '@/agent/ToolExecutor.js'
 import { findTool, toolsToAnthropicFormat } from '@/tools/registry.js'
 import { checkPermission } from '@/permissions/decision.js'
+import { PermissionManager } from '@/permissions/PermissionManager.js'
 import type { PermissionMode } from '@/permissions/modes.js'
 import { loadHooks, triggerHooks } from '@/hooks/HookManager.js'
 import type { HooksFile } from '@/hooks/HookManager.js'
@@ -218,6 +219,12 @@ export async function* queryLoop(
     opts._llmOverride ??
     ((o: object) => llmClient.stream(o as Parameters<typeof llmClient.stream>[0]))
 
+  // refactor: PermissionManager 封装权限决策管线（OOP）
+  const permManager = PermissionManager.fromConfig({
+    permissionMode: opts.permissionMode,
+    permissions: opts.permissions,
+  })
+
   // M5：autoCompact 阈值（默认 200000 contextWindow）
   const contextWindow = opts.contextWindow ?? DEFAULT_CONTEXT_WINDOW
   const compactThreshold = getCompactThreshold(contextWindow)
@@ -400,13 +407,11 @@ export async function* queryLoop(
           continue
         }
 
-        // 权限检查
-        const perm = await checkPermission({
-          tool,
-          input: effectiveInput,
-          ctx: { cwd: opts.cwd, abortSignal: opts.signal, readFileState },
-          permissionMode: opts.permissionMode ?? 'default',
-          rules: opts.permissions ?? { allow: [], ask: [], deny: [] },
+        // 权限检查（通过 PermissionManager 类）
+        const perm = await permManager.check(tool, effectiveInput, {
+          cwd: opts.cwd,
+          abortSignal: opts.signal,
+          readFileState,
         })
         if (perm.decision === 'deny') {
           const content = `权限拒绝: ${perm.reason ?? '匹配 deny 规则'}`

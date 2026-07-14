@@ -24,6 +24,11 @@ export const ConfigSchema = z.object({
   permissionMode: z
     .enum(['default', 'acceptEdits', 'plan', 'bypassPermissions'])
     .default('default'),
+  // 深度比对第 59 轮: sandbox 配置（对标 Claude Code sandbox.credentials）
+  sandbox: z.object({
+    credentials: z.boolean().default(false).describe('阻止 Bash 读取凭证文件（.env/.ssh/.aws）'),
+    allowEnv: z.array(z.string()).default([]).describe('sandbox 模式下允许读取的环境变量名'),
+  }).default(() => ({ credentials: false, allowEnv: [] })),
   maxTokens: z.number().int().positive().default(8192),
   contextWindow: z.number().int().positive().default(200000),
 })

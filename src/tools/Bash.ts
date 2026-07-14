@@ -83,6 +83,17 @@ export const BashTool = buildTool<BashInputType>({
       }
     }
 
+    // 深度比对第 59 轮: sandbox.credentials 防护（对标 Claude Code sandbox.credentials）
+    // 阻止读取凭证文件（.env/.ssh/.aws/.gnupg）
+    const CREDENTIAL_PATHS = ['.env', '.ssh/', '.aws/', '.gnupg/', '.npmrc', '.pypirc', '.docker/']
+    if (CREDENTIAL_PATHS.some((p) => command.includes(p))) {
+      return {
+        ok: false,
+        error: `[REFUSED] 命令访问凭证文件（.env/.ssh/.aws 等），被 sandbox.credentials 阻止。`,
+        isError: true,
+      }
+    }
+
     let child: ChildProcess
     try {
       // 深度比对第 36 轮: 固定 shell 为 bash（对标 Claude Code exec(cmd, signal, 'bash')）

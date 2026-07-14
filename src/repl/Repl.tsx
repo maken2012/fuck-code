@@ -21,6 +21,8 @@ import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands
 import { listCheckpoints, restoreCheckpoint } from '@/tools/checkpoint.js'
 import type { Checkpoint } from '@/tools/checkpoint.js'
 import { loadPromptHistory, appendPromptHistory } from '@/services/PromptHistory.js'
+import { diffText, formatDiff } from '@/utils/diff.js'
+import { readFile } from 'node:fs/promises'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { getAllTools } from '@/tools/registry.js'
@@ -454,6 +456,33 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     setHistory((h) => [...h, { role: 'assistant' as const, text: ok ? `✓ 已恢复 ${target.originalPath}` : `❌ 恢复失败` }])
   }
 
+  // v1.10: /diff 查看本会话改动（基于 checkpoint 对比当前文件）
+  async function handleDiffCommand(): Promise<void> {
+    const checkpoints = await listCheckpoints(process.cwd())
+    if (checkpoints.length === 0) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '没有改动记录（Edit/Write 改文件时会自动 checkpoint）' }])
+      return
+    }
+    const byFile = new Map<string, Checkpoint>()
+    for (const cp of checkpoints) {
+      if (!byFile.has(cp.originalPath)) byFile.set(cp.originalPath, cp)
+    }
+    const diffs: string[] = []
+    for (const [filePath, cp] of byFile) {
+      try {
+        const oldContent = await readFile(cp.checkpointPath, 'utf8')
+        const newContent = await readFile(filePath, 'utf8').catch(() => '(文件已删除)')
+        const d = diffText(oldContent, newContent)
+        const shortPath = filePath.replace(process.cwd() + '/', '')
+        const stats = d.filter((l) => l.type === 'add').length + ' 增 / ' + d.filter((l) => l.type === 'del').length + ' 删'
+        diffs.push(`### ${shortPath}（${stats}）\n${formatDiff(d, 2)}`)
+      } catch {
+        // checkpoint 读失败跳过
+      }
+    }
+    setHistory((h) => [...h, { role: 'assistant' as const, text: `本会话改动（${byFile.size} 个文件）：\n\n${diffs.join('\n\n').slice(0, 5000)}` }])
+  }
+
   // v1.1: 自定义斜杠命令（.fuckcode/commands/*.md）
   async function handleCustomCommand(name: string, args: string): Promise<void> {
     const commands = await loadCustomCommands(process.cwd())
@@ -663,6 +692,14 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         }
         return
       }
+      // v1.10: /diff 查看本会话改动
+      if (text === '/diff') {
+        if (!running) {
+          setInput('')
+          void handleDiffCommand()
+        }
+        return
+      }
       // v1.0 核心差异化：/workflow <需求> 自动走"理解→实现→验证→回顾"四阶段
       if (text.startsWith('/workflow ')) {
         const requirement = text.slice('/workflow '.length).trim()
@@ -703,6 +740,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
 /plan <需求> — 分析需求并产出实施计划（只读，不改文件）
 /workflow <需求> — ★ 自动走"理解→实现→验证→回顾"四阶段完整工作流
 /rewind [N] — 回滚文件到 Edit/Write 前的 checkpoint
+/diff — 查看本会话所有改动（diff 格式）
 /init — 生成 AGENTS.md 模板（项目级 agent 行为约定）
 /agents — 显示当前加载的 AGENTS.md 指令
 /sessions — 列出历史会话
@@ -835,8 +873,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           {pendingPermission
             ? '等待权限确认...'
             : running
-              ? '正在生成... Ctrl+C 中断当前轮次'
-              : 'Ctrl+C 退出 · /help 帮助 · ★ /workflow 完整流程 · /plan 计划 · /model 切换 · /exit 退出'}
+              ? `正在生成（${currentModel}）... Ctrl+C 中断`
+              : `${currentModel} · ${totalTokensRef.current.input + totalTokensRef.current.output} tokens · /help · /diff · /rewind · /exit`}
         </Text>
       </Box>
     </Box>

@@ -97,5 +97,6 @@ test('Repl 显示快捷键提示', () => {
   )
   unmount()
   const frame = lastFrame() ?? ''
-  expect(frame).toContain('Ctrl+C') // 提示快捷键
+  // v1.10: 底部 StatusLine 显示模型名 + 命令提示
+  expect(frame).toMatch(/tokens|\/help|\/exit/) // 底部状态栏含命令提示
 })

@@ -23,11 +23,11 @@ type EditInputType = z.infer<typeof EditInput>
 export const EditTool = buildTool<EditInputType>({
   name: 'Edit',
   description: '字符串替换（必须先 Read，且文件未被外部修改）',
-  prompt: `对文件做字符串替换。
+  prompt: `对文件做字符串替换（精准编辑）。
 
 参数：
 - file_path（必填）：文件绝对路径
-- old_string（必填）：要被替换的字符串，必须在文件中存在
+- old_string（必填）：要被替换的字符串，必须在文件中**精确存在**（含空格/缩进）
 - new_string（必填）：替换为的内容
 - replace_all（可选）：true 时替换所有匹配；默认 false（要求 old_string 唯一）
 
@@ -35,8 +35,12 @@ export const EditTool = buildTool<EditInputType>({
 1. 调用前必须先用 Read 读取该文件（readFileState 有记录）
 2. 文件自上次 Read 后未被外部修改（mtimeMs 必须与记录一致）
 
-如果 old_string 在文件中出现多次且未设 replace_all=true，会拒绝（避免误改多处）。
-写入采用原子操作（写临时文件再 rename）。`,
+**使用技巧**（深度比对第 70 轮增强）：
+- old_string 要足够长以确保唯一（多个匹配会被拒绝并提示行号）
+- 包含 old_string 前后的上下文行（2-3 行）能大幅提高唯一性
+- 智能引号（''""）会自动归一化匹配，但建议直接从 Read 输出复制
+- 写入后自动检查 TS 类型错误（如有 tsc）
+- 编辑后用 LspDiagnostics 或 Bash 运行测试验证`,
   inputSchema: EditInput,
   jsonSchema: {
     type: 'object',

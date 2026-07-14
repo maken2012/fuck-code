@@ -44,7 +44,7 @@ export const WriteTool = buildTool<WriteInputType>({
 
   async execute(input, ctx) {
     const { file_path, content } = input
-    // 深度比对第 11 轮: 大文件防护（1G 限制，对标 Claude Code）
+    // 深度比对第 11 轮: 大文件防护（1G 限制）
     const MAX_WRITE_BYTES = 1024 * 1024 * 1024
     if (content.length > MAX_WRITE_BYTES) {
       return {
@@ -53,32 +53,55 @@ export const WriteTool = buildTool<WriteInputType>({
         isError: true,
       }
     }
-    // 硬护栏：必须先 Read
-    const state = ctx.readFileState.get(file_path)
-    if (!state) {
-      return {
-        ok: false,
-        error: `必须先用 Read 读取该文件后才能 Write: ${file_path}`,
-        isError: true,
+
+    // 深度比对第 28 轮: 文件不存在时允许创建新文件（对标 Claude Code 空文件创建语义）
+    let fileExists = true
+    try {
+      await stat(file_path)
+    } catch {
+      fileExists = false
+    }
+
+    // 硬护栏：已存在的文件必须先 Read（防止盲改）；新文件不需要
+    if (fileExists) {
+      const state = ctx.readFileState.get(file_path)
+      if (!state) {
+        return {
+          ok: false,
+          error: `必须先用 Read 读取该文件后才能 Write: ${file_path}`,
+          isError: true,
+        }
       }
     }
+
     try {
-      // v1.6: 写前 checkpoint 备份（仅文件已存在时）
-      const { checkpoint } = await import('@/tools/checkpoint.js')
-      await checkpoint(ctx.cwd, file_path).catch(() => {})
+      // 深度比对第 28 轮: 自动创建父目录（对标 Claude Code mkdir -p 行为）
+      const { mkdir } = await import('node:fs/promises')
+      const { dirname } = await import('node:path')
+      await mkdir(dirname(file_path), { recursive: true }).catch(() => {})
+
+      // 写前 checkpoint 备份（仅文件已存在时）
+      if (fileExists) {
+        const { checkpoint } = await import('@/tools/checkpoint.js')
+        await checkpoint(ctx.cwd, file_path).catch(() => {})
+      }
+
       // 原子写：写 .tmp.${pid} 再 rename
       const tmpPath = `${file_path}.tmp.${process.pid}`
       await writeFile(tmpPath, content, 'utf8')
       await rename(tmpPath, file_path)
-      // 更新 readFileState（用新的 mtime，避免后续 Edit 误判外部修改）
+
+      // 更新 readFileState（用新的 mtime）
       const newStat = await stat(file_path)
       ctx.readFileState.set(file_path, {
         mtime: newStat.mtimeMs,
         readAt: Date.now(),
       })
+
+      const action = fileExists ? '已写入' : '已创建'
       return {
         ok: true,
-        data: `已写入 ${file_path}（${content.length} 字节）`,
+        data: `${action} ${file_path}（${content.length} 字节）`,
       }
     } catch (e) {
       return { ok: false, error: `写入失败: ${(e as Error).message}`, isError: true }

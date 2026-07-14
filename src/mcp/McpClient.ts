@@ -1,18 +1,19 @@
 // src/mcp/McpClient.ts
-// MCP（Model Context Protocol）客户端最小版。只支持 stdio transport。
-// 让 fuckcode 能连接外部 MCP server，把它们的工具注册成本地工具。
+// MCP（Model Context Protocol）客户端。支持 stdio / sse / http transport。
+// v1.9：从 v1.4 的纯 stdio 扩展到三种 transport，能接远程 MCP server。
 //
 // 配置在 .fuckcode/mcp.json：
 // {
 //   "mcpServers": {
 //     "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },
-//     "fs": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] }
+//     "remote-sse": { "url": "https://example.com/sse", "transport": "sse" },
+//     "remote-http": { "url": "https://example.com/mcp", "transport": "http" }
 //   }
 // }
-//
-// 启动时：连接所有配置的 server，list tools，转成 fuckcode Tool 注册到 registry。
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Tool as McpTool } from '@modelcontextprotocol/sdk/types.js'
 import { buildTool } from '@/tools/Tool.js'
 import type { Tool } from '@/tools/Tool.js'
@@ -20,9 +21,13 @@ import { readFile, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 export interface McpServerConfig {
-  command: string
+  // stdio transport
+  command?: string
   args?: string[]
   env?: Record<string, string>
+  // sse/http transport（v1.9）
+  url?: string
+  transport?: 'stdio' | 'sse' | 'http'
 }
 
 export interface McpConfig {
@@ -32,7 +37,7 @@ export interface McpConfig {
 export interface McpConnection {
   name: string
   client: Client
-  transport: StdioClientTransport
+  transport: StdioClientTransport | SSEClientTransport | StreamableHTTPClientTransport
   tools: Tool[] // 转换后的 fuckcode 工具
 }
 
@@ -87,14 +92,29 @@ export async function connectMcpServer(
   name: string,
   config: McpServerConfig,
 ): Promise<McpConnection> {
-  const transport = new StdioClientTransport({
-    command: config.command,
-    args: config.args ?? [],
-    env: { ...process.env, ...config.env } as Record<string, string>,
-  })
+  // v1.9: 根据 config 选择 transport
+  // - 有 url：按 transport 字段选 sse/http
+  // - 有 command：stdio（默认）
+  let transport: StdioClientTransport | SSEClientTransport | StreamableHTTPClientTransport
+  if (config.url) {
+    const transportType = config.transport ?? 'http'
+    if (transportType === 'sse') {
+      transport = new SSEClientTransport(new URL(config.url))
+    } else {
+      transport = new StreamableHTTPClientTransport(new URL(config.url))
+    }
+  } else if (config.command) {
+    transport = new StdioClientTransport({
+      command: config.command,
+      args: config.args ?? [],
+      env: { ...process.env, ...config.env } as Record<string, string>,
+    })
+  } else {
+    throw new Error(`MCP server "${name}" 配置无效：需要 command（stdio）或 url（sse/http）`)
+  }
 
   const client = new Client(
-    { name: 'fuckcode', version: '1.4.0' },
+    { name: 'fuckcode', version: '1.9.0' },
     { capabilities: {} },
   )
 

@@ -14,6 +14,7 @@ import { WebSearchTool } from '@/tools/WebSearch.js'
 import { WebFetchTool } from '@/tools/WebFetch.js'
 import { AskUserQuestionTool } from '@/tools/AskUserQuestion.js'
 import { LspDiagnosticsTool } from '@/tools/LspDiagnostics.js'
+import { EnterWorktreeTool, ExitWorktreeTool } from '@/tools/Worktree.js'
 import { loadDynamicTools } from '@/tools/dynamicLoader.js'
 
 // 所有内置工具
@@ -26,6 +27,7 @@ export function getAllTools(): Tool[] {
     WebSearchTool, WebFetchTool,            // v1.1 网络工具
     AskUserQuestionTool,                    // v1.2 结构化提问
     LspDiagnosticsTool,                     // v1.7 LSP 诊断
+    EnterWorktreeTool, ExitWorktreeTool,    // v1.9 git worktree
   ]
 }
 

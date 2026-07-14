@@ -19,14 +19,21 @@ const DEFAULT_LIMIT = 2000
 export const ReadTool = buildTool<ReadInputType>({
   name: 'Read',
   description: '读取文件内容',
-  prompt: `读取文件内容，按行号格式输出（cat -n 风格：行号右对齐 6 宽 + tab + 内容）。
+  prompt: `读取文件内容，按行号格式输出（行号 + → + 内容）。
 
 参数：
 - file_path（必填）：文件绝对路径
 - offset（可选）：起始行号，1-based
 - limit（可选）：读取行数，默认 ${DEFAULT_LIMIT}
 
-用途：查看源码、配置文件、日志等文本文件。默认读前 ${DEFAULT_LIMIT} 行。`,
+用途（深度比对第 74 轮增强）：
+- 查看源码、配置文件、日志等文本文件
+- 支持 PNG/JPG/GIF/WEBP/BMP 图片（返回视觉信息）
+- 自动检测二进制文件并拒绝（建议用 Grep 搜索二进制里的字符串）
+- 大文件（>256KB）会拒绝，用 offset/limit 分段读或用 Grep 搜索
+- 超长单行（>50000 字符，如 minified JS）会拒绝
+- 同文件同 range 短时间内重复读取返回缓存标记
+- 文件不存在时提供 did-you-mean 相似文件提示`,
   inputSchema: ReadInput,
   jsonSchema: {
     type: 'object',

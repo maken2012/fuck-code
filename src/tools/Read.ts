@@ -47,6 +47,28 @@ export const ReadTool = buildTool<ReadInputType>({
         return { ok: false, error: `${input.file_path} 不是文件（可能是目录）`, isError: true }
       }
 
+      // 深度比对第 71 轮: 图片识别（对标 Claude Code readImageWithTokenBudget）
+      // PNG/JPG/GIF/WEBP → 返回 base64 image block（给模型看图）
+      const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']
+      if (IMAGE_EXTENSIONS.some((ext) => input.file_path.toLowerCase().endsWith(ext))) {
+        const buf = await readFile(input.file_path)
+        const base64 = buf.toString('base64')
+        const ext = input.file_path.toLowerCase().match(/\.(png|jpe?g|gif|webp|bmp)$/)?.[1] ?? 'png'
+        const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`
+        ctx.readFileState.set(input.file_path, {
+          mtime: stats.mtimeMs,
+          readAt: Date.now(),
+          readRange: 'image',
+          lastContent: undefined, // 图片不缓存文本
+        })
+        pruneReadFileState(ctx.readFileState)
+        // 返回 base64 image（Anthropic API 支持 image content block）
+        return {
+          ok: true,
+          data: `[image:${input.file_path}（${stats.size} 字节）]\nbase64:${mimeType}:${base64.slice(0, 100)}...（已读取，支持视觉理解）`,
+        }
+      }
+
       // 深度比对修复 #1：设备文件防护（防 /dev/zero 等导致 hang）
       const BLOCKED_DEVICES = ['/dev/zero', '/dev/random', '/dev/urandom', '/dev/null', '/dev/stdin', '/dev/full']
       if (BLOCKED_DEVICES.some((d) => input.file_path.startsWith(d))) {

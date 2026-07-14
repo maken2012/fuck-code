@@ -127,10 +127,11 @@ export class ToolExecutor {
   /**
    * 执行已通过权限检查的工具（queryLoop 用）。
    * 只做并发分组 + 执行 + 结果收集，不处理权限。
+   * 深度比对第 44 轮: 支持 onProgress 回调（Bash 长命令实时输出）
    */
   async *executePermitted(
     toolUses: ToolUseRequest[],
-    ctx: { cwd: string; abortSignal: AbortSignal; readFileState: ReadFileState; parentHistory: unknown[] },
+    ctx: { cwd: string; abortSignal: AbortSignal; readFileState: ReadFileState; parentHistory: unknown[]; onProgress?: (data: { lines: string[]; totalLines: number; elapsedMs: number }) => void },
   ): AsyncGenerator<QueryEvent, { blocks: ContentBlock[]; events: QueryEvent[] }> {
     const blocks: ContentBlock[] = []
     const events: QueryEvent[] = []
@@ -173,6 +174,7 @@ export class ToolExecutor {
         abortSignal: ctx.abortSignal,
         readFileState: ctx.readFileState,
         parentHistory: ctx.parentHistory as never,
+        onProgress: ctx.onProgress,
       })
       const { block, event } = this.formatResult(request, tool, result)
       blocks.push(block)

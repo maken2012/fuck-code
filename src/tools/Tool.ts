@@ -13,6 +13,8 @@ export interface ToolContext {
   readFileState: ReadFileState
   /** v1.7：父对话历史（仅 Task fork 模式用，其他工具忽略）。queryLoop 执行 Task 时传入。 */
   parentHistory?: ChatMessage[]
+  /** 深度比对第 44 轮: 进度回调（Bash 长命令实时输出用，对标 Claude Code onProgress） */
+  onProgress?: (data: { lines: string[]; totalLines: number; elapsedMs: number }) => void
 }
 
 // 工具执行结果：成功带 data，失败带 error

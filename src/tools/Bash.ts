@@ -106,8 +106,24 @@ export const BashTool = buildTool<BashInputType>({
       }
     }
 
-    // 前台：收集输出 + 超时控制
+    // 前台：收集输出 + 超时控制 + 进度回调（深度比对第 44 轮）
+    const cmdStartTime = Date.now()
+    let progressStdout = ''
+    let progressTimer: ReturnType<typeof setInterval> | null = null
+    if (ctx.onProgress) {
+      // 每 2s 推最近 3 行输出（对标 Claude Code BashTool onProgress 2s 间隔）
+      child.stdout?.on('data', (d: Buffer) => { progressStdout += d.toString() })
+      progressTimer = setInterval(() => {
+        const lines = progressStdout.split('\n').filter(Boolean)
+        ctx.onProgress?.({
+          lines: lines.slice(-3),
+          totalLines: lines.length,
+          elapsedMs: Date.now() - cmdStartTime,
+        })
+      }, 2000)
+    }
     const outcome = await runChild(child, timeout)
+    if (progressTimer) clearInterval(progressTimer)
     if (outcome.kind === 'spawn_error') {
       return { ok: false, error: `Bash 执行失败: ${outcome.message}`, isError: true }
     }
@@ -337,4 +353,5 @@ function checkDangerousCommand(cmd: string): string | null {
 
   return null
 }
+
 

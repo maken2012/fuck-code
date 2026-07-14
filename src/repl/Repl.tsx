@@ -39,29 +39,29 @@ import {
 } from '@/services/Session.js'
 import type { SessionMeta } from '@/services/Session.js'
 
-// 全部斜杠命令（含简述，用于实时提示）
-const ALL_COMMANDS: { cmd: string; desc: string }[] = [
-  { cmd: '/workflow', desc: '四阶段工作流（理解→实现→验证→回顾）' },
-  { cmd: '/goal', desc: '目标驱动：持续工作直到达成' },
-  { cmd: '/plan', desc: '只读分析，产出实施计划' },
-  { cmd: '/context', desc: '分析 token 占用 + 优化建议' },
-  { cmd: '/diff', desc: '查看本会话改动' },
-  { cmd: '/rewind', desc: '回滚文件到 checkpoint' },
-  { cmd: '/cost', desc: '显示 token 用量' },
-  { cmd: '/model', desc: '查看或切换模型' },
-  { cmd: '/less-perms', desc: '生成 allowlist 减少弹窗' },
-  { cmd: '/init', desc: '生成 AGENTS.md 模板' },
-  { cmd: '/agents', desc: '显示 AGENTS.md 指令' },
-  { cmd: '/sessions', desc: '列出历史会话' },
-  { cmd: '/resume', desc: '恢复历史会话' },
-  { cmd: '/clear', desc: '清空当前上下文' },
-  { cmd: '/help', desc: '显示帮助' },
-  { cmd: '/exit', desc: '退出' },
-  { cmd: '/quit', desc: '退出' },
+// 全部斜杠命令（含详细说明 + 参数 + 用法，用于实时提示和 /help）
+const ALL_COMMANDS: { cmd: string; desc: string; args?: string; example?: string }[] = [
+  { cmd: '/workflow', desc: '自动走四阶段：理解需求→实现代码→验证测试→回顾汇报', args: '<需求>', example: '/workflow 给 README 加安装说明' },
+  { cmd: '/goal', desc: '设定目标，持续工作直到达成（最多 10 轮）', args: '<目标>', example: '/goal 所有测试通过' },
+  { cmd: '/plan', desc: '只读分析需求，产出实施计划（不改文件）', args: '<需求>', example: '/plan 重构认证模块' },
+  { cmd: '/context', desc: '分析当前上下文各类 token 占比 + 优化建议', args: '', example: '/context' },
+  { cmd: '/diff', desc: '查看本次会话修改了哪些文件（diff 格式）', args: '', example: '/diff' },
+  { cmd: '/rewind', desc: '回滚文件到 Edit/Write 前的备份', args: '[序号]', example: '/rewind 或 /rewind 2' },
+  { cmd: '/cost', desc: '显示本次会话累计 token 用量', args: '', example: '/cost' },
+  { cmd: '/model', desc: '查看当前模型 / 切换到别的模型', args: '[模型名]', example: '/model 或 /model gpt-4o' },
+  { cmd: '/less-perms', desc: '分析常用操作，生成权限白名单减少弹窗', args: '', example: '/less-perms' },
+  { cmd: '/init', desc: '生成 AGENTS.md 模板（项目级行为约定）', args: '', example: '/init' },
+  { cmd: '/agents', desc: '显示当前加载的 AGENTS.md 指令内容', args: '', example: '/agents' },
+  { cmd: '/sessions', desc: '列出本项目的历史会话', args: '', example: '/sessions' },
+  { cmd: '/resume', desc: '恢复某个历史会话继续聊', args: '<序号>', example: '/resume 1' },
+  { cmd: '/clear', desc: '清空当前对话上下文（不删历史文件）', args: '', example: '/clear' },
+  { cmd: '/help', desc: '显示完整帮助（命令 + 快捷键）', args: '', example: '/help' },
+  { cmd: '/exit', desc: '退出 fuckcode', args: '', example: '/exit' },
+  { cmd: '/quit', desc: '退出 fuckcode', args: '', example: '/quit' },
 ]
 
 // 实时过滤匹配的命令
-function matchCommands(input: string): { cmd: string; desc: string }[] {
+function matchCommands(input: string): typeof ALL_COMMANDS {
   if (!input.startsWith('/')) return []
   return ALL_COMMANDS.filter((c) => c.cmd.startsWith(input))
 }
@@ -1163,12 +1163,20 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         if (hints.length === 0) return null
         return (
           <Box flexDirection="column" marginTop={0}>
-            {hints.slice(0, 8).map((h, i) => (
-              <Text key={h.cmd} color={i === cmdHintIndex ? 'yellow' : 'gray'} bold={i === cmdHintIndex}>
-                {i === cmdHintIndex ? '> ' : '  '}{h.cmd}
-                <Text dimColor>  {h.desc}</Text>
-              </Text>
-            ))}
+            {hints.slice(0, 8).map((h, i) => {
+              const selected = i === cmdHintIndex
+              return (
+                <Box key={h.cmd} flexDirection="column">
+                  <Text color={selected ? 'yellow' : 'gray'} bold={selected}>
+                    {selected ? '> ' : '  '}{h.cmd}{h.args ? ` ${h.args}` : ''}
+                    <Text dimColor>  —  {h.desc}</Text>
+                  </Text>
+                  {selected && h.example && (
+                    <Text dimColor italic>      例：{h.example}</Text>
+                  )}
+                </Box>
+              )
+            })}
             <Text dimColor>  ↑↓ 选中 · Tab 确认 · Esc 取消</Text>
           </Box>
         )

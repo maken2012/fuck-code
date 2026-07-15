@@ -10,10 +10,19 @@ export interface InputBoxProps {
   running: boolean
   visible: boolean
   cursorOffset?: number
+  /** v1.18: vim 模式指示器（null=vim 关，'normal'/'insert'=显示模式标签） */
+  vimMode?: 'normal' | 'insert' | null
 }
 
-export function InputBox({ input, running, visible, cursorOffset }: InputBoxProps) {
+export function InputBox({ input, running, visible, cursorOffset, vimMode }: InputBoxProps) {
   if (!visible) return null
+
+  // v1.18: vim 模式指示器（底部标签）
+  const vimLabel = vimMode ? (
+    <Text color={vimMode === 'normal' ? 'red' : 'green'} bold>
+      {vimMode === 'normal' ? '-- NORMAL --' : '-- INSERT --'}
+    </Text>
+  ) : null
 
   if (running) {
     return (
@@ -73,21 +82,24 @@ export function InputBox({ input, running, visible, cursorOffset }: InputBoxProp
   const isEmpty = input.length === 0
 
   return (
-    <Box marginTop={1} borderStyle="single" borderColor="red" paddingX={1}>
-      <Text color="yellow" bold>{'> '}</Text>
-      {isEmpty ? (
-        <Text color="gray" dimColor>{'输入需求或 / 查看命令...'}{'\u258B'}</Text>
-      ) : (
-        <>
-          <Text color="white">{before}</Text>
-          {cursorChar ? (
-            <Text color="black" backgroundColor="red" bold>{cursorChar}</Text>
-          ) : (
-            <Text color="red">{'\u258B'}</Text>
-          )}
-          <Text color="white">{after}</Text>
-        </>
-      )}
+    <Box marginTop={1} flexDirection="column" borderStyle="single" borderColor="red" paddingX={1}>
+      <Box>
+        <Text color="yellow" bold>{'> '}</Text>
+        {isEmpty ? (
+          <Text color="gray" dimColor>{'输入需求或 / 查看命令...'}{'\u258B'}</Text>
+        ) : (
+          <>
+            <Text color="white">{before}</Text>
+            {cursorChar ? (
+              <Text color="black" backgroundColor="red" bold>{cursorChar}</Text>
+            ) : (
+              <Text color="red">{'\u258B'}</Text>
+            )}
+            <Text color="white">{after}</Text>
+          </>
+        )}
+      </Box>
+      {vimLabel}
     </Box>
   )
 }

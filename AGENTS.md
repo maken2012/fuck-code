@@ -69,4 +69,5 @@ Service 层 (services/, Effect.ts Context.Tag + Layer)
 
 ## 版本
 
-当前 v1.17.0（见 `src/version.ts`）。16 个工具（+NotebookEdit），31 个命令（+/compact /memory /hooks /status /doctor /review /mcp /permissions /add-dir /emacs），362 tests。
+当前 v1.18.0（见 `src/version.ts`）。16 个工具，34 个命令（+/vim），371 tests。
+v1.18 新增:vim 输入模式 / gpt-tokenizer 精确 token 计数 / Task 嵌套深度 / Grep+Glob+Task streaming / TUI diff viewer + token 仪表盘。

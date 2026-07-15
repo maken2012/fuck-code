@@ -2,10 +2,30 @@
 // 对话历史管理类。封装 Repl 里的 chatHistoryRef + setHistory + 持久化逻辑。
 // 单一职责：管理显示历史（DisplayMessage）和对话上下文（ChatMessage）。
 import type { ChatMessage } from '@/llm/types.js'
+import type { DiffLine } from '@/utils/diff.js'
 
+export interface DiffEntry {
+  file: string
+  stats: string
+  lines: DiffLine[]
+}
+
+export interface TokenBreakdown {
+  total: number
+  contextWindow: number
+  user: number
+  assistant: number
+  toolResult: number
+}
+
+// v1.18: DisplayMessage 扩展结构化字段（kind 区分渲染类型）
+// 不带 kind 或 kind='text' → 纯文本（兼容现有逻辑）
 export interface DisplayMessage {
   role: 'user' | 'assistant'
   text: string
+  kind?: 'text' | 'diff' | 'dashboard'
+  diffs?: DiffEntry[]
+  tokens?: TokenBreakdown
 }
 
 /**

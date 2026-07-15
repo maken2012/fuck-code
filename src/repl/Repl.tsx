@@ -28,6 +28,7 @@ import { CommandHints } from '@/repl/components/CommandHints.js'
 import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
 import { loadSkills } from '@/instruction/skills.js'
 import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
+import { handleVimNormalKey } from '@/repl/vim.js'
 import { listCheckpoints, restoreCheckpoint } from '@/tools/checkpoint.js'
 import type { Checkpoint } from '@/tools/checkpoint.js'
 import { loadPromptHistory, appendPromptHistory } from '@/services/PromptHistory.js'
@@ -80,6 +81,7 @@ const ALL_COMMANDS: { cmd: string; desc: string; args?: string; example?: string
   { cmd: '/permissions', desc: '查看/修改权限规则', args: '[add <allow|ask|deny> <规则> | remove <组> <序号> | mode <模式>]', example: '/permissions 或 /permissions add allow "Bash(git *)"' },
   { cmd: '/add-dir', desc: '添加额外工作目录', args: '[<目录路径>]', example: '/add-dir ../other-project' },
   { cmd: '/emacs', desc: '查看 emacs 编辑快捷键', args: '', example: '/emacs' },
+  { cmd: '/vim', desc: '开关 vim 输入模式（normal/insert 双模态）', args: '', example: '/vim' },
   { cmd: '/exit', desc: '退出 fuckcode', args: '', example: '/exit' },
   { cmd: '/quit', desc: '退出 fuckcode', args: '', example: '/quit' },
 ]
@@ -206,6 +208,10 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const sessionsListRef = useRef<SessionMeta[]>([])
   // v1.13: /add-dir 多目录工作区（Glob/Grep 跨目录搜索）
   const extraDirsRef = useRef<Set<string>>(new Set())
+  // v1.18: vim modal 编辑（输入框行编辑，对标 Claude Code --vim）
+  const vimEnabledRef = useRef(false)
+  const vimModeRef = useRef<'normal' | 'insert'>('insert')
+  const [vimIndicator, setVimIndicator] = useState<'normal' | 'insert' | null>(null) // null=vim 关
 
   // 启动时读一次 config + 创建 session（异步，失败用默认值）
   useEffect(() => {
@@ -1015,6 +1021,13 @@ ${suggestions}${filesNote}
 
 ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健康。'}`,
     }])
+    // v1.18: 同时推送结构化仪表盘（条形图可视化）
+    setHistory((h) => [...h, {
+      role: 'assistant' as const,
+      text: '',
+      kind: 'dashboard',
+      tokens: { total, contextWindow, user: userTokens, assistant: assistantTokens, toolResult: toolResultTokens },
+    }])
   }
 
   // v1.10: /diff 查看本会话改动（基于 checkpoint 对比当前文件）
@@ -1029,6 +1042,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       if (!byFile.has(cp.originalPath)) byFile.set(cp.originalPath, cp)
     }
     const diffs: string[] = []
+    // v1.18: 结构化 diff 数据（供 DiffViewer 渲染）
+    const diffEntries: { file: string; stats: string; lines: ReturnType<typeof diffText> }[] = []
     for (const [filePath, cp] of byFile) {
       try {
         const oldContent = await readFile(cp.checkpointPath, 'utf8')
@@ -1037,11 +1052,16 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         const shortPath = filePath.replace(process.cwd() + '/', '')
         const stats = d.filter((l) => l.type === 'add').length + ' 增 / ' + d.filter((l) => l.type === 'del').length + ' 删'
         diffs.push(`### ${shortPath}（${stats}）\n${formatDiff(d, 2)}`)
+        diffEntries.push({ file: shortPath, stats, lines: d.slice(0, 50) })
       } catch {
         // checkpoint 读失败跳过
       }
     }
     setHistory((h) => [...h, { role: 'assistant' as const, text: `本会话改动（${byFile.size} 个文件）：\n\n${diffs.join('\n\n').slice(0, 5000)}` }])
+    // v1.18: 推送结构化 diff viewer（彩色高亮）
+    if (diffEntries.length > 0) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '', kind: 'diff', diffs: diffEntries }])
+    }
   }
 
   // v1.13: /compact 手动触发上下文压缩（复刻 queryLoop autoCompact 逻辑）
@@ -1908,6 +1928,42 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       },
       { requiresRunning: false },
     )
+    // v1.18: /vim 开关 vim modal 输入模式
+    reg.register(
+      { cmd: '/vim', desc: '开关 vim 模式', args: '', example: '/vim' },
+      () => {
+        vimEnabledRef.current = !vimEnabledRef.current
+        if (vimEnabledRef.current) {
+          vimModeRef.current = 'insert'
+          setVimIndicator('insert')
+          setHistory((h) => [...h, {
+            role: 'assistant' as const,
+            text: `[ OK ] vim 模式已开启（输入框底部显示 -- NORMAL -- / -- INSERT --）
+
+  insert 模式（默认）：正常打字 + emacs 快捷键
+  Esc 切 normal 模式
+
+  normal 模式键位：
+  h l / ← →   左右移动
+  0 / $       行首 / 行尾
+  w / b       下一词 / 上一词
+  i / a       光标处 / 光标后进 insert
+  A / I       行尾 / 行首进 insert
+  x           删光标处字符
+  d           删到行尾
+  Enter       提交输入
+
+再 /vim 关闭。`,
+          }])
+        } else {
+          vimModeRef.current = 'insert'
+          setVimIndicator(null)
+          setHistory((h) => [...h, { role: 'assistant' as const, text: '[ OK ] vim 模式已关闭（恢复 emacs 快捷键）' }])
+        }
+        setInput(''); setCursorOffset(0)
+      },
+      { requiresRunning: false },
+    )
   }
 
   useInput((inputChar, key) => {
@@ -1943,6 +1999,52 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         return
       }
       return // 其他键忽略，继续等 y/n
+    }
+    // v1.18: vim modal 编辑——vim 开启时接管按键
+    if (vimEnabledRef.current) {
+      // insert 模式：Esc 切 normal（不退出程序）；其余走下面的 emacs 逻辑
+      if (vimModeRef.current === 'insert') {
+        if (inputChar === '\x1b' || key.escape) {
+          vimModeRef.current = 'normal'
+          setVimIndicator('normal')
+          // 光标回退一格（vim 习惯：离开 insert 时光标左移）
+          setCursorOffset((o) => Math.max(0, o - 1))
+          return
+        }
+        // 其他 insert 按键继续走下面的 emacs/默认逻辑
+      } else {
+        // normal 模式：vim 接管
+        const result = handleVimNormalKey(
+          { input, offset: cursorOffset, mode: 'normal' },
+          inputChar,
+          key,
+        )
+        if (result.handled) {
+          if (result.submit) {
+            // normal 模式回车提交
+            const text = input.trim()
+            if (text) {
+              // 走回车提交逻辑（复用下面的 return 分支太复杂，这里直接触发 runQuery）
+              if (commandRegistryRef.current && text.startsWith('/')) {
+                const registry = commandRegistryRef.current
+                void registry.tryExecute(text, running).then((handled) => {
+                  if (handled) setInput('')
+                  setCursorOffset(0)
+                })
+                if (registry.match(text).length > 0) return
+              }
+              void runQuery(text)
+              setInput('')
+              setCursorOffset(0)
+            }
+            return
+          }
+          if (result.mode) { vimModeRef.current = result.mode; setVimIndicator(result.mode) }
+          if (result.input !== undefined) { setInput(result.input); setCursorOffset(result.offset ?? cursorOffset) }
+          else if (result.offset !== undefined) setCursorOffset(result.offset)
+          return
+        }
+      }
     }
     // Ctrl+C / Ctrl+D：运行中中断，空闲退出
     if (key.ctrl && (inputChar === 'c' || inputChar === 'd')) {
@@ -2240,7 +2342,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       )}
 
       {/* 输入框——委托给 InputBox 子组件 */}
-      <InputBox input={input} running={running} visible={!pendingPermission} cursorOffset={cursorOffset} />
+      <InputBox input={input} running={running} visible={!pendingPermission} cursorOffset={cursorOffset} vimMode={vimIndicator} />
 
       {/* 实时命令提示——委托给 CommandHints 子组件 */}
       <CommandHints

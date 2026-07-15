@@ -7,6 +7,8 @@ import React from 'react'
 import { Box, Text } from 'ink'
 import type { DisplayMessage } from '@/repl/MessageHistory.js'
 import { renderMarkdown } from '@/utils/markdown.js'
+import { DiffViewer } from '@/repl/components/DiffViewer.js'
+import { TokenDashboard } from '@/repl/components/TokenDashboard.js'
 
 export interface MessageListProps {
   messages: DisplayMessage[]
@@ -18,6 +20,21 @@ function MessageListComponent({ messages, running }: MessageListProps) {
   return (
     <>
       {messages.map((m, i) => {
+        // v1.18: 结构化渲染——按 kind 分支
+        if (m.kind === 'diff' && m.diffs) {
+          return (
+            <Box key={i} marginTop={i === 0 ? 1 : 0} marginLeft={1}>
+              <DiffViewer diffs={m.diffs} />
+            </Box>
+          )
+        }
+        if (m.kind === 'dashboard' && m.tokens) {
+          return (
+            <Box key={i} marginTop={i === 0 ? 1 : 0} marginLeft={1}>
+              <TokenDashboard tokens={m.tokens} />
+            </Box>
+          )
+        }
         if (m.role === 'user') {
           return (
             <Box key={i} marginTop={i === 0 ? 1 : 0}>

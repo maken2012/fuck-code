@@ -25,6 +25,7 @@ const TaskInput = z.object({
     .enum(['explore', 'general', 'fork'])
     .optional()
     .describe('子 agent 类型：explore（只读探索，默认）/ general（通用，可写）/ fork（继承父上下文）'),
+  depth: z.number().int().positive().max(3).optional().describe('最大嵌套深度（子 agent 还能再派子 agent 的层数，默认 1）'),
 })
 type TaskInputType = z.infer<typeof TaskInput>
 
@@ -80,6 +81,7 @@ export const TaskTool = buildTool<TaskInputType>({
       description: { type: 'string', description: '5-15 字任务简述' },
       prompt: { type: 'string', description: '给子 agent 的详细任务指令' },
       subagent_type: { type: 'string', enum: ['explore', 'general', 'fork'], description: 'explore（只读，默认）/ general（可写）/ fork（继承父上下文）' },
+      depth: { type: 'integer', minimum: 1, maximum: 3, description: '最大嵌套深度（默认 1，子 agent 不再派子 agent）' },
     },
     required: ['description', 'prompt'],
   },
@@ -107,9 +109,12 @@ export const TaskTool = buildTool<TaskInputType>({
 
     // 子 agent 的工具集：
     // - explore：只给只读三件套
-    // - general：给全部（不含 Task 防递归）
-    // - fork：给全部（继承上下文，通常继续实现）
-    const allTools = getAllTools().filter((t) => t.name !== 'Task')
+    // - general/fork：给全部
+    // v1.18: depth 控制——当前深度 < maxDepth 时子 agent 可再派 Task，否则过滤掉 Task 防无限递归
+    const myDepth = ctx.currentDepth ?? 0
+    const maxDepth = input.depth ?? 1
+    const canSpawnChild = myDepth < maxDepth
+    const allTools = canSpawnChild ? getAllTools() : getAllTools().filter((t) => t.name !== 'Task')
     const subTools = isExplore
       ? allTools.filter((t) => t.name === 'Read' || t.name === 'Glob' || t.name === 'Grep')
       : allTools
@@ -150,14 +155,24 @@ export const TaskTool = buildTool<TaskInputType>({
         permissionMode: isExplore ? 'plan' : 'acceptEdits', // explore 只读；general 接受编辑
         permissions: { allow: [], ask: [], deny: [] },
         contextWindow: 200000,
+        // v1.18: 嵌套深度 +1，子 agent 知道自己在第几层
+        currentDepth: myDepth + 1,
         // v1.8: sidechain transcript——子 agent 用独立 session 文件，
         // 不污染主上下文（主 agent 只收 subResult 文本摘要）
         sessionId: subSessionId,
       })) {
         if (event.type === 'text_delta') {
           subResult += event.text
+          // v1.18: streaming——把子 agent 的文本输出片段推给父 agent 的进度显示
+          if (ctx.onProgress && subResult.length % 500 < event.text.length) {
+            ctx.onProgress({ lines: [subResult.slice(-200)], totalLines: turn + 1, elapsedMs: Date.now() - Date.now() })
+          }
         } else if (event.type === 'turn_end') {
           turn++
+          // v1.18: streaming——每轮结束推一次进度
+          if (ctx.onProgress) {
+            ctx.onProgress({ lines: [`第 ${turn}/${MAX_SUB_TURNS} 轮完成`], totalLines: turn, elapsedMs: 0 })
+          }
         } else if (event.type === 'error') {
           // 子 agent 内部错误不传播，记录到结果
           subResult += `\n\n[子 agent 错误: ${event.error.message}]`

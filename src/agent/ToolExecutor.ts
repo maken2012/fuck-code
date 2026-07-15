@@ -131,7 +131,7 @@ export class ToolExecutor {
    */
   async *executePermitted(
     toolUses: ToolUseRequest[],
-    ctx: { cwd: string; abortSignal: AbortSignal; readFileState: ReadFileState; parentHistory: unknown[]; onProgress?: (data: { lines: string[]; totalLines: number; elapsedMs: number }) => void },
+    ctx: { cwd: string; abortSignal: AbortSignal; readFileState: ReadFileState; parentHistory: unknown[]; onProgress?: (data: { lines: string[]; totalLines: number; elapsedMs: number; toolUseId?: string }) => void; currentDepth?: number },
   ): AsyncGenerator<QueryEvent, { blocks: ContentBlock[]; events: QueryEvent[] }> {
     const blocks: ContentBlock[] = []
     const events: QueryEvent[] = []
@@ -153,6 +153,12 @@ export class ToolExecutor {
             abortSignal: ctx.abortSignal,
             readFileState: ctx.readFileState,
             parentHistory: ctx.parentHistory as never,
+            currentDepth: ctx.currentDepth,
+            // v1.18: 并发工具也传 onProgress（带 toolUseId 区分并发工具进度）
+            ...(ctx.onProgress ? {
+              onProgress: (data: { lines: string[]; totalLines: number; elapsedMs: number }) =>
+                ctx.onProgress!({ ...data, toolUseId: request.id }),
+            } : {}),
           })
           return { request, tool, result }
         }),
@@ -174,7 +180,12 @@ export class ToolExecutor {
         abortSignal: ctx.abortSignal,
         readFileState: ctx.readFileState,
         parentHistory: ctx.parentHistory as never,
-        onProgress: ctx.onProgress,
+        currentDepth: ctx.currentDepth,
+        // v1.18: 串行工具 onProgress 带 toolUseId（与并发分支一致）
+        ...(ctx.onProgress ? {
+          onProgress: (data: { lines: string[]; totalLines: number; elapsedMs: number }) =>
+            ctx.onProgress!({ ...data, toolUseId: request.id }),
+        } : {}),
       })
       const { block, event } = this.formatResult(request, tool, result)
       blocks.push(block)

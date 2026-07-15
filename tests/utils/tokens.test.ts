@@ -1,10 +1,8 @@
 // tests/utils/tokens.test.ts
-// token 粗估测试。验证中英文混合加权逻辑。
+// token 计数测试。v1.18 改用 gpt-tokenizer（BPE 分词器）精确计数。
 //
-// 预期（spec）：
-// - 纯英文 'hello world'（11 字符）：11/4 ≈ 3 token
-// - 纯中文 '你好世界'（4 字符）：4/1.5 ≈ 3 token
-// - estimateMessagesTokens：遍历 string 与 ContentBlock[] 两种 content
+// 以下值为 gpt-tokenizer 实际输出（GPT BPE），取代旧的字符启发式估算。
+// 注：Claude 无公开 tokenizer，gpt-tokenizer 是合理的精确替代。
 import { test, expect } from 'bun:test'
 import {
   estimateTokens,
@@ -12,29 +10,25 @@ import {
 } from '@/utils/tokens.js'
 import type { ChatMessage } from '@/llm/types.js'
 
-test('纯英文约 4 字符/token', () => {
-  // 11 字符 → ~3 token（Math.ceil(11/4)=3）
-  expect(estimateTokens('hello world')).toBe(3)
+test('纯英文精确计数', () => {
+  // 'hello world' → 2 token（gpt-tokenizer BPE）
+  expect(estimateTokens('hello world')).toBe(2)
   // 空 → 0
   expect(estimateTokens('')).toBe(0)
 })
 
-test('纯中文约 1.5 字符/token', () => {
-  // 4 字符 → Math.ceil(4/1.5)=3
-  expect(estimateTokens('你好世界')).toBe(3)
-  // 6 字符 → Math.ceil(6/1.5)=4
-  expect(estimateTokens('你好世界测试')).toBe(4)
+test('纯中文精确计数', () => {
+  // '你好世界' → 2 token
+  expect(estimateTokens('你好世界')).toBe(2)
+  // '你好世界测试' → 3 token
+  expect(estimateTokens('你好世界测试')).toBe(3)
 })
 
-test('混合文本按比例加权', () => {
-  // 'hello 你好' = 6 英文 + 空格(英文) + 2 中文
-  // 英文部分 7 字符（含空格）/4 ≈ 1.75，中文 2 字符 /1.5 ≈ 1.33
-  // 合计约 3 token（加权后取整）
+test('混合文本计数', () => {
+  // 'hello 你好' → 3 token
   const t = estimateTokens('hello 你好')
+  expect(t).toBe(3)
   expect(t).toBeGreaterThan(0)
-  expect(t).toBeLessThan(10) // 粗估合理范围
-  // 至少不低于纯中文的 2（ceil(2/1.5)=2）
-  expect(t).toBeGreaterThanOrEqual(2)
 })
 
 test('estimateMessagesTokens：含 string 和 ContentBlock[] 两种 content', () => {
@@ -65,8 +59,8 @@ test('estimateMessagesTokens：含 string 和 ContentBlock[] 两种 content', ()
   ]
   const total = estimateMessagesTokens(msgs)
   expect(total).toBeGreaterThan(0)
-  // 至少应包含三段 text 的估算
-  expect(total).toBeGreaterThanOrEqual(4)
+  // 三段 text: hello(1) + world(1) + 你好(1) = 3 token（gpt-tokenizer）
+  expect(total).toBeGreaterThanOrEqual(3)
 })
 
 test('estimateMessagesTokens：空数组返回 0', () => {

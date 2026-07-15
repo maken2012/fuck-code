@@ -179,7 +179,7 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const thinkingTextRef = useRef('')
   const thinkingShownRef = useRef(false)
   // 深度比对修复 #7: 工具调用聚合（避免每个工具 push 两条消息刷屏）
-  const toolBatchRef = useRef<{ tool: string; status: 'running' | 'ok' | 'fail' }[]>([])
+  const toolBatchRef = useRef<{ tool: string; status: 'running' | 'ok' | 'fail'; id?: string }[]>([])
   const [configLoaded, setConfigLoaded] = useState(false)
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null)
@@ -418,22 +418,30 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             // 深度比对修复 #7: 聚合到 batch ref，不单独 push 消息
             const inputStr = JSON.stringify(event.input) ?? ''
             const summary = inputStr.slice(0, 60)
-            toolBatchRef.current.push({ tool: `${toolTag(event.tool)} ${summary}`, status: 'running' })
+            // v1.18: 存 toolUseId 用于并发工具进度精确匹配
+            toolBatchRef.current.push({ tool: `${toolTag(event.tool)} ${summary}`, status: 'running', ...(event.toolUseId ? { id: event.toolUseId } : {}) })
             break
           }
           case 'tool_progress': {
             // 深度比对第 53 轮: Bash 长命令实时进度（对标 Claude Code ShellProgressMessage）
-            // 更新 batch 里最后一个 running 的工具进度
+            // v1.18: 有 toolUseId 时按 id 精确匹配（并发工具），否则回退到最后一个 running
             const batch = toolBatchRef.current
-            for (let j = batch.length - 1; j >= 0; j--) {
-              if (batch[j]?.status === 'running') {
-                const lastLines = event.lines.filter(Boolean).slice(-2).join('\n    ')
-                const dur = event.elapsedMs < 1000 ? `${event.elapsedMs}ms` : `${(event.elapsedMs / 1000).toFixed(0)}s`
-                batch[j] = {
-                  tool: `${batch[j]!.tool}\n    [${dur} · ${event.totalLines} 行] ${lastLines}`,
-                  status: 'running',
-                }
-                break
+            let targetIdx = -1
+            if (event.toolUseId) {
+              targetIdx = batch.findIndex((b) => b.id === event.toolUseId && b.status === 'running')
+            }
+            if (targetIdx === -1) {
+              for (let j = batch.length - 1; j >= 0; j--) {
+                if (batch[j]?.status === 'running') { targetIdx = j; break }
+              }
+            }
+            if (targetIdx >= 0) {
+              const lastLines = event.lines.filter(Boolean).slice(-2).join('\n    ')
+              const dur = event.elapsedMs < 1000 ? `${event.elapsedMs}ms` : `${(event.elapsedMs / 1000).toFixed(0)}s`
+              batch[targetIdx] = {
+                tool: `${batch[targetIdx]!.tool}\n    [${dur} · ${event.totalLines} 行] ${lastLines}`,
+                status: 'running',
+                ...(batch[targetIdx]!.id ? { id: batch[targetIdx]!.id } : {}),
               }
             }
             break
@@ -1692,7 +1700,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
     // 深度比对第 10 轮: /config 运行时查看/修改配置
     reg.register(
       { cmd: '/config', desc: '查看或修改配置', args: '[key=value]', example: '/config model=gpt-4o' },
-      (args) => {
+      async (args) => {
         const cfg = configRef.current
         if (!args) {
           // 显示当前配置
@@ -1719,20 +1727,28 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
             const value = args.slice(eqIdx + 1).trim()
             // 运行时修改 configRef
             if (configRef.current) {
-              if (key === 'model') { configRef.current.model = value; setCurrentModel(value) }
-              else if (key === 'maxTokens') configRef.current.maxTokens = parseInt(value) || 8192
-              else if (key === 'permissionMode') configRef.current.permissionMode = value as typeof configRef.current.permissionMode
-              else if (key === 'provider') configRef.current.provider = value as typeof configRef.current.provider
+              // v1.18: 构造 saveConfig partial（key→值，类型正确）
+              let partial: Record<string, unknown> = {}
+              if (key === 'model') { configRef.current.model = value; setCurrentModel(value); partial = { model: value } }
+              else if (key === 'maxTokens') { configRef.current.maxTokens = parseInt(value) || 8192; partial = { maxTokens: parseInt(value) || 8192 } }
+              else if (key === 'permissionMode') { configRef.current.permissionMode = value as typeof configRef.current.permissionMode; partial = { permissionMode: value } }
+              else if (key === 'provider') { configRef.current.provider = value as typeof configRef.current.provider; partial = { provider: value } }
               else {
                 setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 未知配置项: ${key}\n可改: model / maxTokens / permissionMode / provider` }])
                 return
               }
-              setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] ${key} = ${value}（下次对话生效）` }])
+              // v1.18: 持久化到 user 级配置（与 /permissions 一致，重启不丢失）
+              try {
+                const { saveConfig } = await import('@/services/Config.js')
+                await saveConfig(partial, 'user')
+                setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] ${key} = ${value}（已持久化，下次对话生效）` }])
+              } catch (e) {
+                setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] ${key} = ${value}（本次生效，但持久化失败: ${String(e)}）` }])
+              }
             }
           }
         }
         setInput('')
-        setCursorOffset(0)
         setCursorOffset(0)
       },
     )

@@ -1,28 +1,29 @@
 // src/utils/tokens.ts
-// token 粗估（M5 Task 2）。
+// token 计数。
 //
-// 不调精确 count_tokens API（M6 可加），用字符级启发式：
-// - 英文（ASCII）约 4 字符/token
-// - 中文（CJK 统一表意 \u4e00-\u9fff）约 1.5 字符/token
-// - 混合文本按两类字符数量加权求和
-//
-// 用途：queryLoop 每轮开始前估算 messages 总 token，超过 getCompactThreshold 触发压缩。
+// v1.18: 用 gpt-tokenizer（纯 JS BPE 分词器）精确计数，取代字符启发式。
+// 对代码/JSON/中英混排比旧的"CJK 1.5 / 其他 4 字符每 token"准得多。
+// 注：Claude 无公开 tokenizer，gpt-tokenizer 的 BPE 与 Claude 不完全一致，
+// 但作为 autoCompact 阈值判断 + /context 占比展示已足够精确。
+// image block 无法用 tokenizer 估，维持 ~1500/张启发式。
 import type { ChatMessage } from '@/llm/types.js'
+import { encode } from 'gpt-tokenizer'
 
-// CJK 统一表意文字范围（最常见的中日韩汉字）
-const CJK_RANGE = /[\u4e00-\u9fff]/
+// gpt-tokenizer 对空字符串返回空数组；encode 有最低开销，缓存避免重复计算
+const cache = new Map<string, number>()
+const CACHE_MAX = 500
 
 export function estimateTokens(text: string): number {
   if (!text) return 0
-  let cjk = 0
-  let other = 0
-  for (const ch of text) {
-    if (CJK_RANGE.test(ch)) cjk++
-    else other++
+  const cached = cache.get(text)
+  if (cached !== undefined) return cached
+  const count = encode(text).length
+  if (cache.size >= CACHE_MAX) {
+    // 简单淘汰：清空（避免 LRU 的复杂度，token 估算场景无所谓）
+    cache.clear()
   }
-  // 中文 1.5 字符/token，英文 4 字符/token，加权求和后向上取整
-  const estimate = cjk / 1.5 + other / 4
-  return Math.ceil(estimate)
+  cache.set(text, count)
+  return count
 }
 
 // 估算 messages 数组总 token：对每条消息的 content 取文本估算

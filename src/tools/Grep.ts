@@ -98,12 +98,22 @@ export const GrepTool = buildTool<GrepInputType>({
       const proc = spawn('rg', args, { cwd: ctx.cwd })
       let stdout = ''
       let stderr = ''
+      const startTime = Date.now()
+      // v1.18: streaming 进度（同 Bash 模式）——每 2s 推最近 3 行
+      const progressInterval = ctx.onProgress ? setInterval(() => {
+        const allLines = stdout.split('\n').filter(Boolean)
+        if (allLines.length > 0) {
+          ctx.onProgress!({ lines: allLines.slice(-3), totalLines: allLines.length, elapsedMs: Date.now() - startTime })
+        }
+      }, 2000) : null
       proc.stdout.on('data', (d) => { stdout += d.toString() })
       proc.stderr.on('data', (d) => { stderr += d.toString() })
       proc.on('error', (e) => {
+        if (progressInterval) clearInterval(progressInterval)
         resolve({ ok: false, error: `rg 启动失败（可能未装 ripgrep）: ${e.message}`, isError: true })
       })
       proc.on('close', (code) => {
+        if (progressInterval) clearInterval(progressInterval)
         if (code !== 0 && code !== 1) {
           resolve({ ok: false, error: stderr.trim() || `rg 退出码 ${code}`, isError: true })
           return

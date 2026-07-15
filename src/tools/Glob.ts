@@ -63,6 +63,10 @@ export const GlobTool = buildTool<GlobInputType>({
             // 多目录时用 "dir:path" 前缀区分来源
             matches.push(roots.length > 1 ? `${root.replace(/^.*\//, '')}: ${path}` : path)
           }
+          // v1.18: streaming 进度——每 50 条推一次
+          if (ctx.onProgress && matches.length % 50 === 0 && matches.length > 0) {
+            ctx.onProgress({ lines: matches.slice(-3), totalLines: matches.length, elapsedMs: Date.now() - startTime })
+          }
         }
       }
       if (matches.length === 0) {

@@ -15,9 +15,9 @@ test('estimateMessagesTokens 对 image block 计 ~1500 token', () => {
     },
   ]
   const tokens = estimateMessagesTokens(messages)
-  // text "看这张图" ~ 2 token + image 1500
+  // text "看这张图" 4 token (gpt-tokenizer) + image 1500 = 1504
   expect(tokens).toBeGreaterThan(1500)
-  expect(tokens).toBeLessThan(1510)
+  expect(tokens).toBeLessThan(1520)
 })
 
 test('estimateMessagesTokens 多张图片累计计数', () => {

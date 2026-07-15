@@ -101,6 +101,8 @@ export interface QueryLoopOpts {
   userInput: string // 本次用户输入
   /** v1.13：多模态——附带的图片 content block（注入到 user 消息的 content 数组） */
   userImages?: ContentBlock[]
+  /** v1.18: Task 嵌套深度（0=顶层 agent）。Task 工具用它判断能否再派子 agent。 */
+  currentDepth?: number
   model: string
   system: string
   maxTokens?: number
@@ -308,6 +310,7 @@ export async function* queryLoop(
               type: 'tool_use_start',
               tool: event.toolName,
               input: event.input,
+              toolUseId: event.toolUseId,
             }
             break
           case 'usage':
@@ -372,7 +375,7 @@ export async function* queryLoop(
       // 策略：queryLoop 先做权限检查（含 ask），ToolExecutor 只执行已通过的工具
       const toolResultBlocks: ContentBlock[] = []
       // 深度比对第 53 轮: 进度事件队列（onProgress 回调写入，yield 循环读出）
-      const pendingProgressQueue: { tool: string; lines: string[]; totalLines: number; elapsedMs: number }[] = []
+      const pendingProgressQueue: { tool: string; lines: string[]; totalLines: number; elapsedMs: number; toolUseId?: string }[] = []
       const permittedForExec: ToolUseRequest[] = []
 
       for (const tu of toolUses) {
@@ -434,15 +437,17 @@ export async function* queryLoop(
           abortSignal: opts.signal,
           readFileState,
           parentHistory: messages,
+          currentDepth: opts.currentDepth,
           onProgress: (data) => {
             // onProgress 是回调不是 generator——用 pendingProgress 队列
+            // v1.18: data 含 toolUseId（并发工具区分）
             pendingProgressQueue.push({ tool: currentToolName, ...data })
           },
         })
         // flush 残留进度
         while (pendingProgressQueue.length > 0) {
           const p = pendingProgressQueue.shift()!
-          yield { type: 'tool_progress', tool: p.tool, lines: p.lines, totalLines: p.totalLines, elapsedMs: p.elapsedMs }
+          yield { type: 'tool_progress', tool: p.tool, lines: p.lines, totalLines: p.totalLines, elapsedMs: p.elapsedMs, ...(p.toolUseId ? { toolUseId: p.toolUseId } : {}) }
         }
         toolResultBlocks.push(...execBlocks.blocks)
         for (const evt of execBlocks.events) yield evt

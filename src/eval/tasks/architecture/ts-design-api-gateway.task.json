@@ -1,0 +1,51 @@
+{
+  "id": "arch-ts-design-api-gateway",
+  "name": "设计 API 网关模块",
+  "description": "设计 API 网关：路由转发+令牌桶限流+鉴权。重点在架构分层和接口抽象。3轮引导",
+  "difficulty": "hard",
+  "workspace": {
+    "type": "scratch",
+    "files": {}
+  },
+  "turns": [
+    {
+      "prompt": "分析以下系统设计需求：要设计一个 API 网关模块，需要支持三大功能：1) 路由转发（根据 URL 匹配规则转发到后端）2) 限流（令牌桶算法，可按 IP/用户限流）3) 鉴权（校验 token，可扩展多种鉴权方式如 JWT、API Key）。请分析这三个功能之间应如何解耦，哪些应该抽象成接口/中间件，产出一个简短的设计分析文档 design-analysis.md。",
+      "expectTools": ["Write"]
+    },
+    {
+      "prompt": "基于上一轮的分析，产出这个 API 网关的 TypeScript 接口定义文件 types.ts。要求定义清楚：路由匹配接口（Route、Router）、限流接口（RateLimiter、TokenBucket 实现）、鉴权接口（Authenticator）、以及请求/响应类型（GatewayRequest、GatewayResponse）。这些接口要体现分层设计——中间件链/管道模式。",
+      "expectTools": ["Write"]
+    },
+    {
+      "prompt": "产出一份完整的架构设计文档 ARCHITECTURE.md，包含：1) 模块分层图（文字描述即可）2) 请求处理流程（一个请求从进入到转发的完整链路）3) 关键设计权衡说明（为什么选中间件链而不是 if-else，令牌桶 vs 滑动窗口的取舍）4) 扩展指南（如何加新的限流策略或鉴权方式）。同时补一个 gateway.ts 写关键类的骨架代码（方法签名+注释，不要求完整实现）。",
+      "expectTools": ["Write"]
+    }
+  ],
+  "timeoutMs": 300000,
+  "judge": {
+    "type": "multi-rubric",
+    "passThreshold": 0.6,
+    "dimensions": [
+      {
+        "name": "分层合理性",
+        "weight": 0.3,
+        "criteria": "路由/限流/鉴权是否解耦为独立模块/中间件。是否用了中间件链或管道模式让请求依次经过各层，而不是混在一起。这是架构设计的核心"
+      },
+      {
+        "name": "可扩展性",
+        "weight": 0.25,
+        "criteria": "能否无痛添加新的限流策略（滑动窗口等）或鉴权方式（OAuth 等）。接口是否为此设计了扩展点"
+      },
+      {
+        "name": "接口清晰度",
+        "weight": 0.25,
+        "criteria": "TypeScript 类型定义是否精确（GatewayRequest/Response 的字段是否完整），命名是否规范，接口职责是否单一"
+      },
+      {
+        "name": "设计文档",
+        "weight": 0.2,
+        "criteria": "架构文档是否有清晰的分层说明、请求处理流程、设计权衡分析、扩展指南。文档应能让另一个开发者快速理解设计意图"
+      }
+    ]
+  }
+}

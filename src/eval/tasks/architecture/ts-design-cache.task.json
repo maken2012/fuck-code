@@ -1,0 +1,55 @@
+{
+  "id": "arch-ts-design-cache",
+  "name": "设计通用缓存模块",
+  "description": "设计支持 TTL/LRU 淘汰/最大条目数的通用缓存，要求可扩展淘汰策略。4轮引导",
+  "difficulty": "hard",
+  "workspace": {
+    "type": "scratch",
+    "files": {}
+  },
+  "turns": [
+    {
+      "prompt": "分析以下需求，产出一简短的需求分析（不用写代码）：设计一个通用缓存模块，需要支持：1) TTL（每条目可设过期时间）2) LRU 淘汰策略 3) 最大条目数限制。关键约束：淘汰策略必须可扩展——未来要能加 LFU、FIFO 等新策略而不改核心代码。请分析有哪些关键决策点。",
+      "expectTools": ["Write"]
+    },
+    {
+      "prompt": "基于上一轮的分析，设计这个缓存模块的 TypeScript 接口定义（只写 interface/type，不写实现）。包括：缓存主接口（get/set/delete/size）、淘汰策略接口（EvictionPolicy 接口）、相关类型定义。产出到 cache.ts 文件。",
+      "expectTools": ["Write"]
+    },
+    {
+      "prompt": "现在实现 cache.ts 的核心逻辑：Cache 类（实现你定义的接口）+ LruPolicy（LRU 淘汰策略实现）。要求：get 命中时更新访问顺序；set 超过 maxEntries 时按策略淘汰；TTL 过期的条目 get 时返回 undefined。保持策略接口抽象，让 Cache 依赖 EvictionPolicy 接口而非具体实现。",
+      "expectTools": ["Edit", "Bash"]
+    },
+    {
+      "prompt": "最后写一份简短的设计说明文档 DESIGN.md，说明：1) 为什么用策略模式 2) TTL 和 LRU 如何协同工作 3) 如果要加 LFU 策略需要做什么。再写一个简单的使用示例 example.ts。",
+      "expectTools": ["Write"]
+    }
+  ],
+  "timeoutMs": 360000,
+  "judge": {
+    "type": "multi-rubric",
+    "passThreshold": 0.6,
+    "dimensions": [
+      {
+        "name": "可扩展性",
+        "weight": 0.3,
+        "criteria": "淘汰策略是否抽象为接口（EvictionPolicy），新增 LFU/FIFO 策略时不需要改 Cache 核心代码。这是最关键的维度——策略模式用得好不好"
+      },
+      {
+        "name": "正确性",
+        "weight": 0.25,
+        "criteria": "TTL 过期逻辑、LRU 淘汰顺序、maxEntries 限制是否正确实现。get 命中是否更新访问顺序，超限时是否淘汰最久未使用的"
+      },
+      {
+        "name": "接口设计",
+        "weight": 0.25,
+        "criteria": "TypeScript 类型是否精确（泛型、可选参数），API 命名是否清晰，是否易用。get 返回 undefined 还是抛异常的选择是否合理"
+      },
+      {
+        "name": "文档质量",
+        "weight": 0.2,
+        "criteria": "DESIGN.md 是否说清了设计决策和权衡（为什么用策略模式、TTL/LRU 如何协同、扩展方向）"
+      }
+    ]
+  }
+}

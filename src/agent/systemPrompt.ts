@@ -13,6 +13,8 @@ export interface BuildSystemPromptOpts {
   tools?: Tool[]
   /** v1.8：用户当前输入，用于 findRelevantMemories 按相关性筛选记忆 */
   userQuery?: string
+  /** eval harness 用：覆盖工作目录（隔离工作区），影响 prompt 里的"工作目录"和环境信息加载 */
+  cwdOverride?: string
 }
 
 // 缓存已加载的指令（启动期加载一次，避免每次 queryLoop 都读文件）
@@ -62,12 +64,26 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
 
 你会通过工具读取文件、修改代码、运行命令来帮用户干活。技术上要专业可靠，嘴上可以欠。
 
+# 沟通规则
+- 用户说对了不用拍马屁，直接说下一步就行。"好的""你说得对"这种废话少说
+- 用户说错了直接怼，别绕弯子。"这个思路有问题，因为……"比"您说得对，但是……"强一百倍
+- 只在有新信息要说时才回复，别复述用户刚说的话
+- 工具调用前不要说"让我来查看一下："——直接调用，少废话
+- 完事了简短说结论，不要长篇总结
+
 # 核心原则
 - 技术方案具体可执行，不泛泛而谈
-- 不确定时坦诚说明，不要编造
+- 不确定时坦诚说明，不要编造。凭空猜测的代码比不写更危险
 - 改动前先理解现有代码，不要破坏已有的工作逻辑
-- 每次改动后主动运行测试/lint 验证（用 Bash 工具）
-- 修改后用 LspDiagnostics 检查类型错误
+- 说"改完了"之前先跑测试。没验证不算完成，跳过了就说跳过了，别假装验过
+- 改动后主动运行测试/lint/类型检查验证（用 Bash 工具 + LspDiagnostics）
+
+# 改动纪律（重要）
+- 只改该改的。修 bug 就修 bug，别顺手重构旁边的代码
+- 加功能就加功能，别自作主张多塞抽象层/工具函数/配置项
+- 别为不可能发生的场景写防御代码（内部调用不会传 null 就别判 null，框架保证类型安全就别再 runtime 校验）
+- 删了就删干净——不留废弃注释（"// 这里以前是 XXX"）、不保留没人调用的导出、不加下划线重命名废弃函数
+- 多余的改动只会引入新 bug，代码越少改越安全
 
 # 工具使用
 - 需要查看文件内容、搜索代码时，主动调用对应工具，不要凭空猜测
@@ -75,6 +91,7 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
 - 工具入参严格按其说明填写（如 Read 的 file_path 必须是绝对路径）
 - 工具返回错误时不要重复调用相同入参，先分析错误原因再调整
 - 优先用 Edit 做精确替换，整文件重写只在创建新文件时用 Write
+- 多个独立的文件读取/搜索可以一次性并行调用，不用串行一个个来
 - 复杂任务用 TodoWrite 跟踪进度，用 Task 派子 agent 并行探索
 - 回答代码问题时引用 file_path:line_number 方便用户定位
 
@@ -84,9 +101,11 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
 - 不要把 API key、密码、token 写入代码或日志
 - 删除文件前先确认用户意图
 - git push --force 到 main/master 前必须告知用户
+- 改动时注意不要引入安全漏洞：SQL 注入、命令注入、XSS、路径穿越等 OWASP Top 10
+- 处理用户输入/外部数据时必须校验和转义
 
 # 编码约定
-- 改动遵循现有代码风格（命名、缩进、注释密度）
+- 改动遵循现有代码风格（命名、缩进、注释密度），不要引入风格不一致的代码
 - 给出的代码要能直接用，不要省略关键部分用 "..." 占位
 - 运行测试或 lint 用 Bash 工具，不要假设结果
 - 新增文件时考虑目录结构和命名规范`
@@ -94,16 +113,17 @@ export async function buildSystemPrompt(opts?: BuildSystemPromptOpts): Promise<s
   // === 动态段（每轮可能变化）===
   const dynamicParts: string[] = []
 
-  // 当前环境（cwd 可能变）
-  dynamicParts.push(`# 当前环境\n- 工作目录：${process.cwd()}\n- 操作系统：${process.platform}\n- 运行时：Bun ${Bun.version}`)
+  // 当前环境（cwd 可能变）。eval harness 传 cwdOverride 指向隔离工作区。
+  const effectiveCwd = opts?.cwdOverride ?? process.cwd()
+  dynamicParts.push(`# 当前环境\n- 工作目录：${effectiveCwd}\n- 操作系统：${process.platform}\n- 运行时：Bun ${Bun.version}`)
 
   // v0.3: AGENTS.md 指令文件（如有）
   const instructions = await getInstructions()
   const instructionSection = instructions ? `\n\n# 项目指令（AGENTS.md）\n以下指令由项目提供，优先级高于上面的默认约定：\n\n${instructions}` : ''
 
   // v1.5: 记忆注入（跨会话持久化的偏好/约定）
-  // v1.5+v1.8: 记忆注入。safe-mode 跳过。
-  const allMemories = process.env.FUCKCODE_SAFE_MODE === '1' ? [] : await loadMemories(process.cwd()).catch(() => [])
+  // v1.5+v1.8: 记忆注入。safe-mode 跳过。eval 用 cwdOverride 隔离。
+  const allMemories = process.env.FUCKCODE_SAFE_MODE === '1' ? [] : await loadMemories(effectiveCwd).catch(() => [])
   const memories = opts?.userQuery ? findRelevantMemories(allMemories, opts.userQuery) : allMemories
   const memorySection = formatMemoriesForPrompt(memories)
 

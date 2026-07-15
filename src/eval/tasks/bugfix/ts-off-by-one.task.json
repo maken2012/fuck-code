@@ -1,0 +1,24 @@
+{
+  "id": "bugfix-ts-off-by-one",
+  "name": "分页 off-by-one",
+  "description": "分页函数有 off-by-one bug，边界页码算错，修复让它通过测试",
+  "difficulty": "easy",
+  "workspace": {
+    "type": "scratch",
+    "files": {
+      "paginate.ts": "// 分页工具（有 bug）\n\nexport interface PageResult<T> {\n  items: T[]\n  page: number        // 当前页码（1-based）\n  totalPages: number  // 总页数\n  totalItems: number  // 总条目数\n}\n\n// 对数组分页\n// page 是 1-based（第 1 页是首页）\n// pageSize 是每页条目数\nexport function paginate<T>(arr: T[], page: number, pageSize: number): PageResult<T> {\n  const totalItems = arr.length\n  // bug：这里用 Math.floor 导致最后一页丢失\n  const totalPages = Math.floor(totalItems / pageSize)\n  if (totalPages === 0) {\n    return { items: arr, page: 1, totalPages: 1, totalItems }\n  }\n\n  // bug：起始索引算错了（page 直接乘 pageSize，没减 1）\n  const startIndex = page * pageSize\n  const endIndex = startIndex + pageSize\n  const items = arr.slice(startIndex, endIndex)\n\n  return { items, page, totalPages, totalItems }\n}\n",
+      "paginate.test.ts": "import { test, expect } from 'bun:test'\nimport { paginate } from './paginate'\n\ntest('第 1 页', () => {\n  const data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n  const result = paginate(data, 1, 3)\n  expect(result.items).toEqual([1, 2, 3])\n  expect(result.page).toBe(1)\n  expect(result.totalPages).toBe(4) // 10/3 = 3.33 -> 4 页\n})\n\ntest('中间页', () => {\n  const data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n  const result = paginate(data, 2, 3)\n  expect(result.items).toEqual([4, 5, 6])\n  expect(result.page).toBe(2)\n})\n\ntest('最后一页不满', () => {\n  const data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n  const result = paginate(data, 4, 3)\n  // 第 4 页只有 1 个元素（10 = 3*3 + 1）\n  expect(result.items).toEqual([10])\n  expect(result.totalPages).toBe(4)\n})\n\ntest('刚好整除', () => {\n  const data = [1, 2, 3, 4, 5, 6]\n  const result = paginate(data, 2, 3)\n  expect(result.items).toEqual([4, 5, 6])\n  expect(result.totalPages).toBe(2)\n})\n\ntest('单页', () => {\n  const data = [1, 2, 3]\n  const result = paginate(data, 1, 5)\n  expect(result.items).toEqual([1, 2, 3])\n  expect(result.totalPages).toBe(1)\n})\n\ntest('空数组', () => {\n  const result = paginate([], 1, 10)\n  expect(result.items).toEqual([])\n  expect(result.totalItems).toBe(0)\n})\n\ntest('totalItems 正确', () => {\n  const data = [1, 2, 3, 4, 5]\n  const result = paginate(data, 1, 2)\n  expect(result.totalItems).toBe(5)\n})\n\ntest('页大小为 1', () => {\n  const data = ['a', 'b', 'c']\n  const result = paginate(data, 2, 1)\n  expect(result.items).toEqual(['b'])\n  expect(result.totalPages).toBe(3)\n})\n"
+    }
+  },
+  "turns": [
+    {
+      "prompt": "paginate.ts 里的分页函数有 off-by-one bug：totalPages 计算错误（最后一页丢失），起始索引算错了。请审查代码找出 bug 并修复，让所有测试通过。重点检查边界：第 1 页、最后 1 页、整除、不满一页的情况。",
+      "expectTools": ["Read", "Edit", "Bash"]
+    }
+  ],
+  "judge": {
+    "type": "test",
+    "command": "bun test paginate.test.ts",
+    "timeoutMs": 30000
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "id": "algo-ts-binary-search",
+  "name": "二分查找",
+  "description": "实现二分查找，返回目标在有序数组中的索引（找不到返回 -1）",
+  "difficulty": "easy",
+  "workspace": {
+    "type": "scratch",
+    "files": {
+      "search.ts": "// 实现二分查找\n\n// 在有序数组 arr 中查找 target，返回索引；找不到返回 -1\nexport function binarySearch(arr: number[], target: number): number {\n  // TODO: 实现\n  return -1\n}\n",
+      "search.test.ts": "import { test, expect } from 'bun:test'\nimport { binarySearch } from './search'\n\ntest('找到中间元素', () => {\n  expect(binarySearch([1, 3, 5, 7, 9], 5)).toBe(2)\n})\n\ntest('找到第一个', () => {\n  expect(binarySearch([1, 3, 5, 7, 9], 1)).toBe(0)\n})\n\ntest('找到最后一个', () => {\n  expect(binarySearch([1, 3, 5, 7, 9], 9)).toBe(4)\n})\n\ntest('找不到返回 -1', () => {\n  expect(binarySearch([1, 3, 5, 7, 9], 4)).toBe(-1)\n})\n\ntest('空数组', () => {\n  expect(binarySearch([], 1)).toBe(-1)\n})\n\ntest('单元素数组 - 找到', () => {\n  expect(binarySearch([5], 5)).toBe(0)\n})\n\ntest('单元素数组 - 找不到', () => {\n  expect(binarySearch([5], 3)).toBe(-1)\n})\n\ntest('负数', () => {\n  expect(binarySearch([-5, -3, -1, 0, 2], -3)).toBe(1)\n})\n"
+    }
+  },
+  "turns": [
+    {
+      "prompt": "请实现 search.ts 里的 binarySearch 函数。输入是有序数组（升序）和目标值，返回目标值的索引，找不到返回 -1。改完跑测试验证。",
+      "expectTools": ["Edit", "Bash"]
+    }
+  ],
+  "judge": {
+    "type": "test",
+    "command": "bun test search.test.ts",
+    "timeoutMs": 30000
+  }
+}

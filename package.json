@@ -12,6 +12,7 @@
     "start": "bun run bin/fuckcode.js",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "eval": "bun run src/eval/cli.ts",
     "build": "bun build src/cli.tsx --compile --outfile fuckcode --target bun-darwin-arm64 --define process.env.NODE_ENV='production'",
     "build:all": "bun run script/build-all.ts",
     "link:global": "sudo ln -sf $(pwd)/bin/fuckcode.js /usr/local/bin/fuckcode && sudo ln -sf $(pwd)/bin/fuckcode.js /usr/local/bin/fc",

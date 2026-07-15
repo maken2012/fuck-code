@@ -1,0 +1,25 @@
+{
+  "id": "parse-py-toml",
+  "name": "简易 TOML 读取器",
+  "description": "实现简易 TOML 解析：key=value、[section]、数组、注释",
+  "difficulty": "hard",
+  "workspace": {
+    "type": "scratch",
+    "files": {
+      "toml_parser.py": "# 简易 TOML 读取器\n# 支持的语法：\n# - 注释：以 # 开头的行\n# - key = value：字符串（双引号/单引号）、整数、布尔值\n# - [section]：表（section 下的 key 进入该 table）\n# - 数组：[1, 2, 3] 或 [\"a\", \"b\"]\n# - 空行忽略\n\n\ndef parse_toml(text):\n    \"\"\"解析 TOML 字符串，返回 dict\n\n    示例输入：\n      # config\n      title = \"My App\"\n      debug = true\n\n      [server]\n      port = 8080\n      host = \"localhost\"\n\n    示例输出：\n      {\"title\": \"My App\", \"debug\": True, \"server\": {\"port\": 8080, \"host\": \"localhost\"}}\n    \"\"\"\n    # TODO: 实现\n    pass\n",
+      "test_toml.py": "from toml_parser import parse_toml\n\n\ndef test_string_value():\n    result = parse_toml('title = \"My App\"')\n    assert result == {\"title\": \"My App\"}\n\n\ndef test_single_quoted_string():\n    result = parse_toml(\"name = 'hello'\")\n    assert result == {\"name\": \"hello\"}\n\n\ndef test_integer_value():\n    result = parse_toml(\"port = 8080\")\n    assert result == {\"port\": 8080}\n\n\ndef test_boolean():\n    result = parse_toml(\"debug = true\\nproduction = false\")\n    assert result == {\"debug\": True, \"production\": False}\n\n\ndef test_section():\n    toml = '[server]\\nport = 8080\\nhost = \"localhost\"'\n    result = parse_toml(toml)\n    assert result == {\"server\": {\"port\": 8080, \"host\": \"localhost\"}}\n\n\ndef test_multiple_sections():\n    toml = '[db]\\nhost = \"db1\"\\n\\n[server]\\nhost = \"web1\"'\n    result = parse_toml(toml)\n    assert result == {\n        \"db\": {\"host\": \"db1\"},\n        \"server\": {\"host\": \"web1\"},\n    }\n\n\ndef test_top_level_and_section():\n    toml = 'app = \"api\"\\n\\n[server]\\nport = 3000'\n    result = parse_toml(toml)\n    assert result == {\"app\": \"api\", \"server\": {\"port\": 3000}}\n\n\ndef test_comments():\n    toml = '# this is a comment\\nkey = \"value\"\\n# another comment'\n    result = parse_toml(toml)\n    assert result == {\"key\": \"value\"}\n\n\ndef test_inline_comment():\n    toml = 'port = 8080  # server port'\n    result = parse_toml(toml)\n    assert result == {\"port\": 8080}\n\n\ndef test_array_of_integers():\n    toml = 'ports = [8000, 8001, 8002]'\n    result = parse_toml(toml)\n    assert result == {\"ports\": [8000, 8001, 8002]}\n\n\ndef test_array_of_strings():\n    toml = 'tags = [\"web\", \"api\", \"v2\"]'\n    result = parse_toml(toml)\n    assert result == {\"tags\": [\"web\", \"api\", \"v2\"]}\n\n\ndef test_empty_lines():\n    toml = '\\n\\nkey = \"value\"\\n\\n\\n'\n    result = parse_toml(toml)\n    assert result == {\"key\": \"value\"}\n\n\ndef test_empty_input():\n    assert parse_toml(\"\") == {}\n\n\ndef test_negative_integer():\n    result = parse_toml(\"offset = -100\")\n    assert result == {\"offset\": -100}\n",
+      "conftest.py": "import sys\nimport os\nsys.path.insert(0, os.path.dirname(__file__))\n"
+    }
+  },
+  "turns": [
+    {
+      "prompt": "请实现 toml_parser.py 里的 parse_toml 函数。解析 TOML 字符串返回 dict。需支持：字符串（双引号/单引号）、整数（含负数）、布尔值（true/false）、[section] 表、数组（整数/字符串）、注释（整行和行内）、空行。改完跑 python3 -m pytest test_toml.py -v 验证所有用例。",
+      "expectTools": ["Edit", "Bash"]
+    }
+  ],
+  "judge": {
+    "type": "test",
+    "command": "python3 -m pytest test_toml.py -v",
+    "timeoutMs": 30000
+  }
+}

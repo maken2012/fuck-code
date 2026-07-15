@@ -1,0 +1,50 @@
+{
+  "id": "03-refactor",
+  "name": "重构为面向对象",
+  "description": "给一段面条式代码，要求重构成类（OOP），用 tsc 类型检查判定",
+  "difficulty": "medium",
+  "workspace": {
+    "type": "scratch",
+    "files": {
+      "shapes.ts": "// 重构前：面条式代码，用 if-else 处理不同形状的面积计算\n// 要求：重构成 OOP（Shape 基类 + Circle/Rectangle/Triangle 子类）\n\nexport type ShapeType = 'circle' | 'rectangle' | 'triangle'\n\n// 计算面积（面条式，要求重构）\nexport function calculateArea(type: ShapeType, ...args: number[]): number {\n  if (type === 'circle') {\n    const radius = args[0] || 0\n    return Math.PI * radius * radius\n  } else if (type === 'rectangle') {\n    const width = args[0] || 0\n    const height = args[1] || 0\n    return width * height\n  } else if (type === 'triangle') {\n    const base = args[0] || 0\n    const height = args[1] || 0\n    return 0.5 * base * height\n  }\n  return 0\n}\n",
+      "tsconfig.json": "{\n  \"compilerOptions\": {\n    \"strict\": true,\n    \"noEmit\": true,\n    \"target\": \"ES2022\",\n    \"module\": \"ESNext\",\n    \"moduleResolution\": \"bundler\",\n    \"esModuleInterop\": true,\n    \"skipLibCheck\": true\n  }\n}\n"
+    }
+  },
+  "turns": [
+    {
+      "prompt": "shapes.ts 是面条式代码，用 if-else 处理不同形状。请重构成面向对象：定义 Shape 抽象基类（含 area 抽象方法），Circle/Rectangle/Triangle 三个子类各自实现。保持 calculateArea 向后兼容（仍能被调用）。改完确保 tsc --noEmit 通过。",
+      "expectTools": ["Read", "Write", "Bash"]
+    }
+  ],
+  "judge": {
+    "type": "composite",
+    "requireAll": true,
+    "judges": [
+      {
+        "type": "lint",
+        "command": "npx tsc --noEmit",
+        "timeoutMs": 30000
+      },
+      {
+        "type": "behavior",
+        "assertions": [
+          {
+            "kind": "file-contains",
+            "path": "shapes.ts",
+            "pattern": "class\\s+Shape"
+          },
+          {
+            "kind": "file-contains",
+            "path": "shapes.ts",
+            "pattern": "class\\s+Circle"
+          },
+          {
+            "kind": "file-contains",
+            "path": "shapes.ts",
+            "pattern": "class\\s+Rectangle"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "id": "05-behavior-assert",
+  "name": "行为断言：创建 CLI 工具",
+  "description": "要求创建一个 CLI 工具文件，用行为断言判定（文件存在 + 可执行）",
+  "difficulty": "easy",
+  "workspace": {
+    "type": "scratch",
+    "files": {}
+  },
+  "turns": [
+    {
+      "prompt": "创建一个 greet.ts 文件，实现一个命令行工具：执行 `bun run greet.ts <名字>` 时打印 \"你好，<名字>！\"。不传参数时打印 \"你好，世界！\"。要求：代码要能通过 tsc --noEmit 类型检查，且 bun run greet.ts 张三 能正确输出。",
+      "expectTools": ["Write", "Bash"]
+    }
+  ],
+  "judge": {
+    "type": "composite",
+    "requireAll": true,
+    "judges": [
+      {
+        "type": "behavior",
+        "assertions": [
+          {
+            "kind": "file-exists",
+            "path": "greet.ts"
+          },
+          {
+            "kind": "file-contains",
+            "path": "greet.ts",
+            "pattern": "你好"
+          },
+          {
+            "kind": "command-exits-zero",
+            "command": "bun run greet.ts 测试",
+            "timeoutMs": 10000
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "id": "bugfix-py-async-leak",
+  "name": "异步资源泄漏",
+  "description": "异步文件处理函数未正确关闭资源，修复让 cleanup 被执行",
+  "difficulty": "medium",
+  "workspace": {
+    "type": "scratch",
+    "files": {
+      "processor.py": "# 异步文件处理器（有 bug）\n\nimport asyncio\nimport io\n\n\nclass AsyncFileProcessor:\n    \"\"\"异步文件处理器\"\"\"\n\n    def __init__(self):\n        self.processed_count = 0\n        self._cleanup_called = False\n\n    async def _cleanup(self):\n        \"\"\"清理资源（模拟关闭文件/连接）\"\"\"\n        self._cleanup_called = True\n\n    async def process_items(self, items):\n        \"\"\"处理一组数据项\n\n        bug：处理过程中如果某项失败（抛异常），_cleanup 不会被调用，\n        导致资源泄漏。请修复确保无论成功还是失败，cleanup 都被执行。\n        \"\"\"\n        for item in items:\n            # bug: 这里没有 try/finally，异常会跳过 cleanup\n            if item < 0:\n                raise ValueError(f\"非法数据: {item}\")\n            await asyncio.sleep(0.001)  # 模拟异步处理\n            self.processed_count += 1\n\n        # bug: cleanup 写在正常路径末尾，异常时不会执行\n        await self._cleanup()\n        return self.processed_count\n\n    @property\n    def cleanup_was_called(self):\n        return self._cleanup_called\n",
+      "test_processor.py": "import asyncio\nimport pytest\nfrom processor import AsyncFileProcessor\n\n\ndef test_normal_processing():\n    proc = AsyncFileProcessor()\n    result = asyncio.run(proc.process_items([1, 2, 3]))\n    assert result == 3\n    assert proc.processed_count == 3\n    assert proc.cleanup_was_called is True\n\n\ndef test_empty_items():\n    proc = AsyncFileProcessor()\n    result = asyncio.run(proc.process_items([]))\n    assert result == 0\n    assert proc.cleanup_was_called is True\n\n\ndef test_cleanup_on_error():\n    \"\"\"关键测试：异常时 cleanup 必须被调用\"\"\"\n    proc = AsyncFileProcessor()\n    with pytest.raises(ValueError):\n        asyncio.run(proc.process_items([1, -2, 3]))\n    # bug 修复后这应该通过\n    assert proc.cleanup_was_called is True\n\n\ndef test_partial_processing_on_error():\n    proc = AsyncFileProcessor()\n    with pytest.raises(ValueError):\n        asyncio.run(proc.process_items([1, 2, -3]))\n    # 前两个处理成功\n    assert proc.processed_count == 2\n    # cleanup 仍被调用\n    assert proc.cleanup_was_called is True\n\n\ndef test_cleanup_exactly_once():\n    proc = AsyncFileProcessor()\n    asyncio.run(proc.process_items([1, 2, 3]))\n    # cleanup 不应被重复调用（processed_count 不会被 cleanup 影响）\n    assert proc.cleanup_was_called is True\n\n\ndef test_first_item_error():\n    proc = AsyncFileProcessor()\n    with pytest.raises(ValueError):\n        asyncio.run(proc.process_items([-1]))\n    assert proc.processed_count == 0\n    assert proc.cleanup_was_called is True\n"
+    }
+  },
+  "turns": [
+    {
+      "prompt": "processor.py 里的 process_items 有资源泄漏 bug：处理过程中如果某项抛异常，_cleanup 不会被调用。请用 try/finally 或 try/except/finally 修复，确保无论成功还是失败 cleanup 都执行。注意 cleanup 不应被重复调用。改完跑 python3 -m pytest test_processor.py -v 验证。",
+      "expectTools": ["Read", "Edit", "Bash"]
+    }
+  ],
+  "judge": {
+    "type": "test",
+    "command": "python3 -m pytest test_processor.py -v",
+    "timeoutMs": 30000
+  }
+}

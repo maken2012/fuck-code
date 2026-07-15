@@ -1,0 +1,24 @@
+{
+  "id": "parse-ts-csv",
+  "name": "CSV 解析器",
+  "description": "解析 CSV 字符串为对象数组，处理引号/转义/跨行字段",
+  "difficulty": "medium",
+  "workspace": {
+    "type": "scratch",
+    "files": {
+      "csv.ts": "// CSV 解析器\n\n// 把 CSV 字符串解析为对象数组\n// 第一行是表头（列名），后续每行是一条记录\n// 规则：\n// - 字段用逗号分隔\n// - 含逗号/引号/换行的字段用双引号包裹\n// - 字段内的双引号用两个双引号转义（\"\"）\n// - 双引号包裹的字段可以跨行\n\n// 例如：\n// name,age,desc\n// Alice,30,\"Hello, World\"\n// Bob,25,\"He said \"\"hi\"\"\"\n// -> [{ name: 'Alice', age: '30', desc: 'Hello, World' }, { name: 'Bob', age: '25', desc: 'He said \"hi\"' }]\n\nexport function parseCSV(csv: string): Record<string, string>[] {\n  // TODO: 实现\n  return []\n}\n",
+      "csv.test.ts": "import { test, expect } from 'bun:test'\nimport { parseCSV } from './csv'\n\ntest('基本解析', () => {\n  const csv = 'name,age\\nAlice,30\\nBob,25'\n  const result = parseCSV(csv)\n  expect(result).toEqual([\n    { name: 'Alice', age: '30' },\n    { name: 'Bob', age: '25' },\n  ])\n})\n\ntest('引号内逗号', () => {\n  const csv = 'name,desc\\nAlice,\"Hello, World\"'\n  const result = parseCSV(csv)\n  expect(result[0]).toEqual({ name: 'Alice', desc: 'Hello, World' })\n})\n\ntest('引号转义双引号', () => {\n  const csv = 'name,quote\\nBob,\"He said \"\"hi\"\"\"'\n  const result = parseCSV(csv)\n  expect(result[0]).toEqual({ name: 'Bob', quote: 'He said \"hi\"' })\n})\n\ntest('跨行字段', () => {\n  const csv = 'name,desc\\nAlice,\"Line1\\nLine2\"'\n  const result = parseCSV(csv)\n  expect(result[0]).toEqual({ name: 'Alice', desc: 'Line1\\nLine2' })\n})\n\ntest('空字段', () => {\n  const csv = 'a,b,c\\n1,,3'\n  const result = parseCSV(csv)\n  expect(result[0]).toEqual({ a: '1', b: '', c: '3' })\n})\n\ntest('只有表头', () => {\n  const csv = 'a,b,c'\n  const result = parseCSV(csv)\n  expect(result).toEqual([])\n})\n\ntest('空字符串', () => {\n  expect(parseCSV('')).toEqual([])\n})\n\ntest('单个字段', () => {\n  const csv = 'name\\nAlice\\nBob'\n  const result = parseCSV(csv)\n  expect(result).toEqual([{ name: 'Alice' }, { name: 'Bob' }])\n})\n\ntest('末尾换行', () => {\n  const csv = 'a,b\\n1,2\\n'\n  const result = parseCSV(csv)\n  expect(result).toEqual([{ a: '1', b: '2' }])\n})\n\ntest('引号包裹的整个字段含换行和逗号', () => {\n  const csv = 'id,text\\n1,\"foo,\\nbar,\\nbaz\"\\n2,plain'\n  const result = parseCSV(csv)\n  expect(result[0]).toEqual({ id: '1', text: 'foo,\\nbar,\\nbaz' })\n  expect(result[1]).toEqual({ id: '2', text: 'plain' })\n})\n"
+    }
+  },
+  "turns": [
+    {
+      "prompt": "请实现 csv.ts 里的 parseCSV 函数。解析 CSV 字符串：第一行是表头，后续每行是一条记录。规则：字段用逗号分隔；含逗号/引号/换行的字段用双引号包裹；字段内的双引号用 \"\" 转义；引号包裹的字段可跨行。改完跑 bun test csv.test.ts 验证所有边界情况。",
+      "expectTools": ["Edit", "Bash"]
+    }
+  ],
+  "judge": {
+    "type": "test",
+    "command": "bun test csv.test.ts",
+    "timeoutMs": 30000
+  }
+}

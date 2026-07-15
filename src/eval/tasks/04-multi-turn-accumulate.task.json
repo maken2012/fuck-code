@@ -1,0 +1,58 @@
+{
+  "id": "04-multi-turn-accumulate",
+  "name": "多轮累积：构建栈数据结构",
+  "description": "4 轮引导：搭骨架→加 push/pop→加测试→修 peek bug。考验上下文保持",
+  "difficulty": "medium",
+  "workspace": {
+    "type": "scratch",
+    "files": {}
+  },
+  "turns": [
+    {
+      "prompt": "创建一个 stack.ts 文件，定义一个 Stack 类（泛型 Stack<T>），先只写空的类骨架和私有数组存储。不要实现方法。",
+      "expectTools": ["Write"]
+    },
+    {
+      "prompt": "现在给 Stack 类加上 push(item: T)、pop(): T | undefined、size(): number 三个方法。push 加到栈顶，pop 从栈顶取出。",
+      "expectTools": ["Read", "Edit"]
+    },
+    {
+      "prompt": "创建 stack.test.ts，用 bun:test 写测试覆盖 push/pop/size 的基本场景：空栈 pop 返回 undefined、push 后 size 增加、pop 返回最后 push 的元素。",
+      "expectTools": ["Write"]
+    },
+    {
+      "prompt": "给 Stack 加一个 peek() 方法返回栈顶元素但不移除。然后跑测试确认没破坏已有功能。",
+      "expectTools": ["Read", "Edit", "Bash"]
+    }
+  ],
+  "judge": {
+    "type": "composite",
+    "requireAll": true,
+    "judges": [
+      {
+        "type": "test",
+        "command": "bun test",
+        "timeoutMs": 30000
+      },
+      {
+        "type": "behavior",
+        "assertions": [
+          {
+            "kind": "file-contains",
+            "path": "stack.ts",
+            "pattern": "class\\s+Stack"
+          },
+          {
+            "kind": "file-contains",
+            "path": "stack.ts",
+            "pattern": "peek\\s*\\("
+          },
+          {
+            "kind": "file-exists",
+            "path": "stack.test.ts"
+          }
+        ]
+      }
+    ]
+  }
+}

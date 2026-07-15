@@ -1,0 +1,45 @@
+{
+  "id": "ds-ts-linked-list",
+  "name": "泛型双向链表",
+  "description": "实现泛型双向链表：insert/remove/at/toArray，用单元测试+结构断言判定",
+  "difficulty": "medium",
+  "workspace": {
+    "type": "scratch",
+    "files": {
+      "linkedlist.ts": "// 泛型双向链表实现\n\n// 节点\nclass ListNode<T> {\n  value: T\n  prev: ListNode<T> | null = null\n  next: ListNode<T> | null = null\n  constructor(value: T) {\n    this.value = value\n  }\n}\n\n// 双向链表\nexport class LinkedList<T> {\n  private head: ListNode<T> | null = null\n  private tail: ListNode<T> | null = null\n  private _size = 0\n\n  // 在末尾插入\n  insert(value: T): void {\n    // TODO: 实现\n  }\n\n  // 删除指定值（第一个匹配的），返回是否删除成功\n  remove(value: T): boolean {\n    // TODO: 实现\n    return false\n  }\n\n  // 获取指定索引的值（0-based）\n  at(index: number): T | undefined {\n    // TODO: 实现\n    return undefined\n  }\n\n  // 转为数组\n  toArray(): T[] {\n    // TODO: 实现\n    return []\n  }\n\n  get size(): number {\n    return this._size\n  }\n}\n",
+      "linkedlist.test.ts": "import { test, expect } from 'bun:test'\nimport { LinkedList } from './linkedlist'\n\ntest('insert 和 toArray', () => {\n  const list = new LinkedList<number>()\n  list.insert(1)\n  list.insert(2)\n  list.insert(3)\n  expect(list.toArray()).toEqual([1, 2, 3])\n  expect(list.size).toBe(3)\n})\n\ntest('at 索引访问', () => {\n  const list = new LinkedList<string>()\n  list.insert('a')\n  list.insert('b')\n  list.insert('c')\n  expect(list.at(0)).toBe('a')\n  expect(list.at(1)).toBe('b')\n  expect(list.at(2)).toBe('c')\n  expect(list.at(3)).toBeUndefined()\n  expect(list.at(-1)).toBeUndefined()\n})\n\ntest('remove 中间元素', () => {\n  const list = new LinkedList<number>()\n  list.insert(1)\n  list.insert(2)\n  list.insert(3)\n  expect(list.remove(2)).toBe(true)\n  expect(list.toArray()).toEqual([1, 3])\n  expect(list.size).toBe(2)\n})\n\ntest('remove 头部元素', () => {\n  const list = new LinkedList<number>()\n  list.insert(1)\n  list.insert(2)\n  expect(list.remove(1)).toBe(true)\n  expect(list.toArray()).toEqual([2])\n})\n\ntest('remove 尾部元素', () => {\n  const list = new LinkedList<number>()\n  list.insert(1)\n  list.insert(2)\n  expect(list.remove(2)).toBe(true)\n  expect(list.toArray()).toEqual([1])\n})\n\ntest('remove 不存在的元素', () => {\n  const list = new LinkedList<number>()\n  list.insert(1)\n  expect(list.remove(99)).toBe(false)\n  expect(list.size).toBe(1)\n})\n\ntest('remove 到空链表', () => {\n  const list = new LinkedList<number>()\n  list.insert(1)\n  list.remove(1)\n  expect(list.toArray()).toEqual([])\n  expect(list.size).toBe(0)\n})\n\ntest('空链表操作', () => {\n  const list = new LinkedList<number>()\n  expect(list.toArray()).toEqual([])\n  expect(list.at(0)).toBeUndefined()\n  expect(list.size).toBe(0)\n})\n\ntest('泛型支持字符串', () => {\n  const list = new LinkedList<string>()\n  list.insert('hello')\n  list.insert('world')\n  expect(list.toArray()).toEqual(['hello', 'world'])\n})\n\n// 验证删除后链表结构正确（连续删除+插入）\ntest('混合操作', () => {\n  const list = new LinkedList<number>()\n  list.insert(1)\n  list.insert(2)\n  list.insert(3)\n  list.insert(4)\n  list.remove(2) // [1,3,4]\n  list.remove(4) // [1,3]\n  list.insert(5) // [1,3,5]\n  expect(list.toArray()).toEqual([1, 3, 5])\n})\n"
+    }
+  },
+  "turns": [
+    {
+      "prompt": "请实现 linkedlist.ts 里的 LinkedList 类的四个方法：insert（尾部插入）、remove（删第一个匹配值）、at（按索引取值，越界返回 undefined）、toArray（转数组）。这是双向链表，注意 prev/next 指针维护。改完跑 bun test linkedlist.test.ts 验证。",
+      "expectTools": ["Edit", "Bash"]
+    }
+  ],
+  "judge": {
+    "type": "composite",
+    "requireAll": true,
+    "judges": [
+      {
+        "type": "test",
+        "command": "bun test linkedlist.test.ts",
+        "timeoutMs": 30000
+      },
+      {
+        "type": "behavior",
+        "assertions": [
+          {
+            "kind": "file-contains",
+            "path": "linkedlist.ts",
+            "pattern": "class\\s+LinkedList"
+          },
+          {
+            "kind": "file-contains",
+            "path": "linkedlist.ts",
+            "pattern": "class\\s+ListNode"
+          }
+        ]
+      }
+    ]
+  }
+}

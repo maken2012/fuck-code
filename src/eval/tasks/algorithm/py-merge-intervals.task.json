@@ -1,0 +1,24 @@
+{
+  "id": "algo-py-merge-intervals",
+  "name": "合并重叠区间",
+  "description": "给定一组区间，合并所有重叠的区间，返回合并后的结果",
+  "difficulty": "medium",
+  "workspace": {
+    "type": "scratch",
+    "files": {
+      "intervals.py": "# 合并重叠区间\n\n# 输入：区间列表，每个区间是 [start, end]\n# 输出：合并后的区间列表（按 start 排序）\n# 例如：[[1,3],[2,6],[8,10],[15,18]] -> [[1,6],[8,10],[15,18]]\ndef merge_intervals(intervals):\n    # TODO: 实现\n    pass\n",
+      "test_intervals.py": "from intervals import merge_intervals\n\ndef test_no_overlap():\n    assert merge_intervals([[1, 2], [3, 4], [5, 6]]) == [[1, 2], [3, 4], [5, 6]]\n\ndef test_all_overlap():\n    assert merge_intervals([[1, 4], [2, 5], [3, 6]]) == [[1, 6]]\n\ndef test_partial_overlap():\n    assert merge_intervals([[1, 3], [2, 6], [8, 10], [15, 18]]) == [[1, 6], [8, 10], [15, 18]]\n\ndef test_empty():\n    assert merge_intervals([]) == []\n\ndef test_single():\n    assert merge_intervals([[1, 4]]) == [[1, 4]]\n\ndef test_unsorted_input():\n    # 输入可能未排序，应正确处理\n    assert merge_intervals([[8, 10], [1, 3], [2, 6]]) == [[1, 6], [8, 10]]\n\ndef test_contained_interval():\n    # 一个区间完全包含在另一个里\n    assert merge_intervals([[1, 10], [2, 5], [3, 4]]) == [[1, 10]]\n\ndef test_adjacent_not_overlapping():\n    # 相邻但不重叠：[1,2] 和 [2,3] 视为重叠（端点相同）\n    assert merge_intervals([[1, 2], [2, 3]]) == [[1, 3]]\n\ndef test_negative_numbers():\n    assert merge_intervals([[-3, -1], [-2, 0], [1, 3]]) == [[-3, 0], [1, 3]]\n"
+    }
+  },
+  "turns": [
+    {
+      "prompt": "请实现 intervals.py 里的 merge_intervals 函数。输入是一组区间（每个是 [start, end]），把所有重叠的合并（端点相同也算重叠），结果按 start 排序。注意输入可能未排序。改完跑 python3 -m pytest test_intervals.py 验证。",
+      "expectTools": ["Edit", "Bash"]
+    }
+  ],
+  "judge": {
+    "type": "test",
+    "command": "python3 -m pytest test_intervals.py -v",
+    "timeoutMs": 30000
+  }
+}

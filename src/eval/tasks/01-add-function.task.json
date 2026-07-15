@@ -1,0 +1,24 @@
+{
+  "id": "01-add-function",
+  "name": "添加求和函数",
+  "description": "给一个空模块，要求实现 add(a,b) 函数，用单元测试判定",
+  "difficulty": "easy",
+  "workspace": {
+    "type": "scratch",
+    "files": {
+      "calc.ts": "// 实现下面的函数\n\n// 返回两个数字的和\nexport function add(a: number, b: number): number {\n  // TODO: 在这里实现\n  throw new Error('未实现')\n}\n",
+      "calc.test.ts": "import { test, expect } from 'bun:test'\nimport { add } from './calc'\n\ntest('add 基本加法', () => {\n  expect(add(1, 2)).toBe(3)\n  expect(add(0, 0)).toBe(0)\n})\n\ntest('add 负数', () => {\n  expect(add(-1, -2)).toBe(-3)\n  expect(add(-1, 1)).toBe(0)\n})\n\ntest('add 小数', () => {\n  expect(add(0.1, 0.2)).toBeCloseTo(0.3)\n})\n"
+    }
+  },
+  "turns": [
+    {
+      "prompt": "请实现 calc.ts 里的 add 函数，让它返回两个数字的和。改完直接跑测试验证。",
+      "expectTools": ["Edit", "Bash"]
+    }
+  ],
+  "judge": {
+    "type": "test",
+    "command": "bun test calc.test.ts",
+    "timeoutMs": 30000
+  }
+}

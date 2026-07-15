@@ -1,0 +1,46 @@
+{
+  "id": "req-ts-api-design",
+  "name": "博客系统 RESTful API 设计",
+  "description": "为博客系统设计 RESTful API，产出接口文档+TS类型定义。2轮引导",
+  "difficulty": "medium",
+  "workspace": {
+    "type": "scratch",
+    "files": {}
+  },
+  "turns": [
+    {
+      "prompt": "为一个博客系统做 API 需求分析。系统需要支持：文章（Posts）的 CRUD，每篇文章有标题/正文/作者/标签；评论（Comments）—— 读者可以对文章评论；标签（Tags）—— 文章可打多个标签，可按标签筛选文章；分页/排序。请分析这些资源之间的关系，产出一个简短的分析文档 analysis.md，列出需要哪些资源和它们的关系。",
+      "expectTools": ["Write"]
+    },
+    {
+      "prompt": "基于上一轮的分析，产出完整的 API 设计：1) routes.md —— RESTful 接口文档，列出所有端点的 HTTP 方法/URI/请求体/响应/状态码，需覆盖所有 CRUD + 分页 + 按标签筛选 + 文章的评论列表；2) types.ts —— 所有请求/响应/错误的 TypeScript 类型定义，要精确完整。",
+      "expectTools": ["Write"]
+    }
+  ],
+  "judge": {
+    "type": "multi-rubric",
+    "passThreshold": 0.65,
+    "dimensions": [
+      {
+        "name": "RESTful 规范",
+        "weight": 0.3,
+        "criteria": "URI 是否用名词复数（/posts 不该是 /post 或 /getPosts），HTTP 方法语义是否正确（GET 查询/POST 创建/PUT/PATCH 更新/DELETE 删除），状态码是否恰当（201 Created/204 No Content/404/422）"
+      },
+      {
+        "name": "完整性",
+        "weight": 0.25,
+        "criteria": "是否覆盖了所有资源的 CRUD，是否处理了关联资源（如 GET /posts/:id/comments），是否支持分页/排序/过滤（query params），是否遗漏关键操作"
+      },
+      {
+        "name": "类型设计",
+        "weight": 0.25,
+        "criteria": "TypeScript 类型是否精确——请求体/响应体/错误响应都有类型定义，是否用了泛型（如分页响应泛型 PaginatedResponse<T>），类型是否自洽"
+      },
+      {
+        "name": "文档质量",
+        "weight": 0.2,
+        "criteria": "routes.md 是否清晰、有请求/响应示例，错误处理是否说明（每种错误返回什么），文档是否让前端开发者能直接用"
+      }
+    ]
+  }
+}

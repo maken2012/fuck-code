@@ -31,12 +31,33 @@ function toOpenAIMessages(system: string, messages: ChatMessage[]): unknown[] {
     if (typeof m.content === 'string') {
       result.push({ role: m.role, content: m.content })
     } else {
-      // 结构化 content（含 tool_use/tool_result）：简化为文本拼接
-      const text = (m.content as Array<{ type: string; text?: string; content?: string }>)
-        .filter((b) => b.type === 'text' || b.type === 'tool_result')
-        .map((b) => b.text ?? b.content ?? '')
-        .join('\n')
-      result.push({ role: m.role, content: text || '（结构化内容已简化）' })
+      // v1.13: 检查是否含 image block——若有，构造 OpenAI 多模态 content 数组
+      const blocks = m.content as Array<{ type: string; text?: string; content?: string; source?: { type: string; media_type?: string; data?: string } }>
+      const hasImage = blocks.some((b) => b.type === 'image')
+      if (hasImage) {
+        // 多模态：text block → text，image block → image_url
+        const parts: unknown[] = []
+        for (const b of blocks) {
+          if (b.type === 'text' && b.text) {
+            parts.push({ type: 'text', text: b.text })
+          } else if (b.type === 'image' && b.source?.data) {
+            parts.push({
+              type: 'image_url',
+              image_url: { url: `data:${b.source.media_type ?? 'image/png'};base64,${b.source.data}` },
+            })
+          } else if (b.type === 'tool_result') {
+            parts.push({ type: 'text', text: b.content ?? '' })
+          }
+        }
+        result.push({ role: m.role, content: parts.length > 0 ? parts : '（空）' })
+      } else {
+        // 结构化 content（含 tool_use/tool_result，无图）：简化为文本拼接
+        const text = blocks
+          .filter((b) => b.type === 'text' || b.type === 'tool_result')
+          .map((b) => b.text ?? b.content ?? '')
+          .join('\n')
+        result.push({ role: m.role, content: text || '（结构化内容已简化）' })
+      }
     }
   }
   return result

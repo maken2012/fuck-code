@@ -16,6 +16,11 @@ const program = new Command()
   .option('--api-base-url <url>', '覆盖 config.json 的 apiBaseUrl（第三方兼容中转）')
   .option('--plan', '只读分析模式（不修改任何文件，适合需求分析/代码审查）')
   .option('--safe-mode', '安全模式：禁用所有定制（AGENTS.md/memory/hooks/MCP/自定义命令/动态工具），排查问题用')
+  // v1.13: headless CI 增强（对标 Claude Code -p --output-format --max-turns）
+  .option('-p, --print <prompt>', '非交互单轮模式（同位置参数 prompt，CI 友好）')
+  .option('--output-format <format>', '输出格式：text（默认）/ json（CI 友好，结构化结果）', 'text')
+  .option('--max-turns <n>', '最大工具调用轮次（防止死循环，默认 25）', '25')
+  .option('--permission-mode <mode>', '权限模式：default/acceptEdits/plan/bypassPermissions（覆盖 config）')
   .action(async (prompt, opts) => {
     const safeMode = opts.safeMode ?? false
     if (safeMode) {
@@ -29,8 +34,9 @@ const program = new Command()
       apiBaseUrlOverride: opts.apiBaseUrl,
     }
 
-    // 有 prompt → 一次性模式
-    if (prompt) {
+    // 有 prompt → 一次性模式（位置参数 prompt 或 -p/--print 都触发）
+    const oncePrompt = prompt ?? opts.print
+    if (oncePrompt) {
       // 读 stdin（如果是管道）
       let stdin: string | undefined
       if (!process.stdin.isTTY) {
@@ -44,11 +50,16 @@ const program = new Command()
           // stdin 读失败不阻塞
         }
       }
+      // v1.13: permission-mode flag 优先，其次 --plan
+      const permMode = (opts.permissionMode as 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | undefined) ??
+        (opts.plan ? 'plan' : undefined)
       await runOnce({
-        prompt,
+        prompt: oncePrompt,
         stdin,
         ...common,
-        permissionMode: opts.plan ? 'plan' : undefined,
+        permissionMode: permMode,
+        outputFormat: opts.outputFormat as 'text' | 'json' | undefined,
+        maxTurns: parseInt(opts.maxTurns) || undefined,
       })
       return
     }

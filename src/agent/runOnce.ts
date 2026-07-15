@@ -24,6 +24,10 @@ export interface RunOnceOpts {
   apiBaseUrlOverride?: string
   /** 非交互模式默认 acceptEdits（允许写操作不弹窗）；用 bypassPermissions 跳过所有检查 */
   permissionMode?: PermissionMode
+  /** v1.13: 输出格式——text（默认，流式 stdout）/ json（CI 友好，结束时输出结构化结果） */
+  outputFormat?: 'text' | 'json'
+  /** v1.13: 最大工具调用轮次（防止死循环，默认 25） */
+  maxTurns?: number
   /** 测试用：注入 mock queryLoop（生产代码不传） */
   _queryLoopOverride?: (opts: object) => AsyncGenerator<QueryEvent>
 }
@@ -79,6 +83,14 @@ export async function runOnce(opts: RunOnceOpts): Promise<void> {
 
   const queryLoopFn = opts._queryLoopOverride ?? (queryLoop as unknown as (o: object) => AsyncGenerator<QueryEvent>)
 
+  // v1.13: JSON 模式累积结果，结束时一次性输出；text 模式流式输出
+  const jsonMode = opts.outputFormat === 'json'
+  const maxTurns = opts.maxTurns ?? 25
+  let jsonResult = ''
+  let jsonTools: Array<{ tool: string; ok: boolean }> = []
+  let jsonUsage = { input: 0, output: 0, cacheRead: 0 }
+  let turnCount = 0
+
   try {
     for await (const event of queryLoopFn({
       history: [],
@@ -98,45 +110,77 @@ export async function runOnce(opts: RunOnceOpts): Promise<void> {
     })) {
       switch (event.type) {
         case 'text_delta':
-          // 深度比对第 32 轮: stdout 纯文本（管道友好，对标 Claude Code -p）
-          process.stdout.write(event.text)
+          jsonResult += event.text
+          if (!jsonMode) {
+            // 深度比对第 32 轮: stdout 纯文本（管道友好，对标 Claude Code -p）
+            process.stdout.write(event.text)
+          }
           break
         case 'tool_use_start': {
-          // 深度比对第 32 轮: 用 ASCII tag（对标 REPL 改造，去 emoji）
-          const summary = summarizeTool(event.tool, event.input)
-          process.stderr.write(`\n${dim}[${event.tool}]${summary ? ` ${summary}` : ''}${reset}\n`)
+          jsonTools.push({ tool: event.tool, ok: true })
+          if (!jsonMode) {
+            // 深度比对第 32 轮: 用 ASCII tag（对标 REPL 改造，去 emoji）
+            const summary = summarizeTool(event.tool, event.input)
+            process.stderr.write(`\n${dim}[${event.tool}]${summary ? ` ${summary}` : ''}${reset}\n`)
+          }
           break
         }
         case 'tool_result':
           if (!event.ok) {
-            process.stderr.write(`${yellow}[FAIL] ${event.tool}: ${event.content}${reset}\n`)
+            // 标记最后一个同名工具为失败
+            for (let j = jsonTools.length - 1; j >= 0; j--) {
+              if (jsonTools[j]!.tool === event.tool) { jsonTools[j]!.ok = false; break }
+            }
+            if (!jsonMode) {
+              process.stderr.write(`${yellow}[FAIL] ${event.tool}: ${event.content}${reset}\n`)
+            }
           }
           break
         case 'permission_request':
           event.resolve('deny')
-          process.stderr.write(`${yellow}[WARN] 非交互模式拒绝: ${event.tool}${reset}\n`)
+          if (!jsonMode) process.stderr.write(`${yellow}[WARN] 非交互模式拒绝: ${event.tool}${reset}\n`)
           break
         case 'compacted':
-          process.stderr.write(`${dim}[上下文已压缩]${reset}\n`)
+          if (!jsonMode) process.stderr.write(`${dim}[上下文已压缩]${reset}\n`)
           break
         case 'turn_end':
+          turnCount++
+          // v1.13: max-turns 安全阀（防止死循环）
+          if (turnCount >= maxTurns) {
+            if (!jsonMode) process.stderr.write(`${yellow}[达到最大轮次 ${maxTurns}，停止]${reset}\n`)
+            break
+          }
           break
         case 'usage': {
-          const cost = event.input + event.output
-          process.stderr.write(`\n${dim}[${cost} tokens · cache ${event.cacheRead}]${reset}\n`)
+          jsonUsage = { input: event.input, output: event.output, cacheRead: event.cacheRead }
+          if (!jsonMode) {
+            const cost = event.input + event.output
+            process.stderr.write(`\n${dim}[${cost} tokens · cache ${event.cacheRead}]${reset}\n`)
+          }
           break
         }
         case 'error':
-          process.stderr.write(`\n${red}错误: ${event.error.message}${reset}\n`)
+          if (!jsonMode) process.stderr.write(`\n${red}错误: ${event.error.message}${reset}\n`)
           break
         case 'aborted':
-          process.stderr.write(`\n${yellow}[已中断]${reset}\n`)
+          if (!jsonMode) process.stderr.write(`\n${yellow}[已中断]${reset}\n`)
           break
         case 'done':
           break
       }
+      if (turnCount >= maxTurns) break
     }
-    process.stdout.write('\n')
+    if (jsonMode) {
+      // JSON 模式：结构化结果到 stdout（CI 解析友好）
+      process.stdout.write(JSON.stringify({
+        result: jsonResult,
+        tools: jsonTools,
+        usage: jsonUsage,
+        turns: turnCount,
+      }, null, 2) + '\n')
+    } else {
+      process.stdout.write('\n')
+    }
   } catch (e) {
     process.stderr.write(`\n\x1b[31m致命错误: ${String(e)}\x1b[0m\n`)
     process.exit(1)

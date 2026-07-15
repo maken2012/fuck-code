@@ -16,6 +16,11 @@ export type ContentBlock =
       content: string
       is_error?: boolean
     }
+  // v1.13: 多模态图片（Anthropic image block 格式）
+  | {
+      type: 'image'
+      source: { type: 'base64'; media_type: string; data: string }
+    }
 
 // 一条对话消息（Anthropic API 兼容格式）
 export interface ChatMessage {

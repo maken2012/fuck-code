@@ -40,6 +40,9 @@ export function estimateMessagesTokens(messages: ChatMessage[]): number {
         total += estimateTokens(block.text)
       } else if (block.type === 'tool_result') {
         total += estimateTokens(block.content)
+      } else if (block.type === 'image') {
+        // v1.13: 图片按 ~1500 token/张估算（Anthropic 视觉模型典型值，防 autoCompact 失准）
+        total += 1500
       }
       // tool_use 不计入（input 体积小，且难精确估算）
     }

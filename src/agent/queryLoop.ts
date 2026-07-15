@@ -99,6 +99,8 @@ const defaultSessionApi: SessionApi = {
 export interface QueryLoopOpts {
   history: ChatMessage[] // 已有对话历史（不含本次 user 输入）
   userInput: string // 本次用户输入
+  /** v1.13：多模态——附带的图片 content block（注入到 user 消息的 content 数组） */
+  userImages?: ContentBlock[]
   model: string
   system: string
   maxTokens?: number
@@ -167,7 +169,10 @@ export async function* queryLoop(
   }
 
   // 本次用户输入加入 messages。
-  const userMessage: ChatMessage = { role: 'user', content: effectiveUserInput }
+  // v1.13: 多模态——有图片时构造 ContentBlock[]（text + image blocks），否则用纯字符串
+  const userMessage: ChatMessage = opts.userImages && opts.userImages.length > 0
+    ? { role: 'user', content: [{ type: 'text', text: effectiveUserInput }, ...opts.userImages] }
+    : { role: 'user', content: effectiveUserInput }
 
   // v1.12: 自动记忆提取（safe-mode 跳过）。检测用户偏好/约定/禁忌，自动存为 memory。
   if (process.env.FUCKCODE_SAFE_MODE !== '1') {

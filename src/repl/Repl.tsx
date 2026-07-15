@@ -263,6 +263,44 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     }
   }, [running])
 
+  // v1.13: 从输入文本提取图片路径（@path 或绝对/相对路径的图片文件），读取为 image content block。
+  // 支持的扩展名：png/jpg/jpeg/gif/webp/bmp。返回 [图片blocks, 去掉图片路径后的文本]。
+  async function extractImages(text: string): Promise<[ContentBlock[], string]> {
+    const imgExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']
+    const blocks: ContentBlock[] = []
+    let cleaned = text
+    // 匹配 @path/to/img.png 或 路径以图片扩展名结尾
+    // 先找 @path 形式
+    const atPattern = /@(\/[^\s@]+|[\w./-]+)\.(png|jpe?g|gif|webp|bmp)/gi
+    let match: RegExpExecArray | null
+    const foundPaths = new Set<string>()
+    while ((match = atPattern.exec(text)) !== null) {
+      foundPaths.add(match[0].slice(1)) // 去掉 @
+    }
+    // 再找裸路径（不含 @，但以图片扩展名结尾，且像文件路径）
+    const barePattern = /(^|\s)((?:\/[\w./-]+)|(?:\.{0,2}\/[\w./-]+)|(?:[\w-]+\/[\w./-]+))\.(png|jpe?g|gif|webp|bmp)/gi
+    while ((match = barePattern.exec(text)) !== null) {
+      foundPaths.add(match[2]!)
+    }
+    for (const relPath of foundPaths) {
+      const abs = resolve(process.cwd(), relPath)
+      try {
+        const buf = await readFile(abs)
+        const ext = relPath.toLowerCase().match(/\.(\w+)$/)?.[1] ?? 'png'
+        const mediaType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`
+        blocks.push({
+          type: 'image',
+          source: { type: 'base64', media_type: mediaType, data: buf.toString('base64') },
+        })
+        // 从文本里移除该路径（避免重复传给模型）
+        cleaned = cleaned.replace(new RegExp('@?' + relPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '').trim()
+      } catch {
+        // 文件不存在/读失败跳过（保留原文本）
+      }
+    }
+    return [blocks, blocks.length > 0 ? cleaned : text]
+  }
+
   async function runQuery(text: string) {
     const config = configRef.current ?? {
       model: 'claude-sonnet-4-5-20250929',
@@ -298,16 +336,20 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     }
 
     // 立即新增 user + 空 assistant 两条消息
+    // v1.13: 提取图片路径 → image content block
+    const [images, textNoImg] = await extractImages(text)
+    const displayText = images.length > 0 ? `${textNoImg} [附带 ${images.length} 张图片]` : text
     setHistory((h) => [
       ...h,
-      { role: 'user', text },
+      { role: 'user', text: displayText },
       { role: 'assistant', text: '' },
     ])
 
     try {
       for await (const event of queryLoop({
         history: chatHistoryRef.current,
-        userInput: text,
+        userInput: textNoImg,
+        ...(images.length > 0 ? { userImages: images } : {}),
         model: config.model,
         system: await buildSystemPrompt({ tools: getAllTools() }),
         maxTokens: config.maxTokens,

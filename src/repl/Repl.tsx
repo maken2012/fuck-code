@@ -817,7 +817,9 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           return
         }
         const msgs = await restoreSnapshot(target)
-        chatHistoryRef.current = msgs
+        // 深度比对修复: 同步 historyMgrRef（与 /resume 一致），否则 UI 渲染源与实际 messages 分裂
+        historyMgrRef.restore(msgs)
+        chatHistoryRef.current = historyMgrRef.getChat()
         setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 对话已回滚到快照: ${target.label}（${msgs.length} 条消息）` }])
       } catch (e) {
         setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 对话回滚失败: ${String(e)}` }])
@@ -1143,7 +1145,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
     for (const ev of eventNames) {
       const list = hooks[ev] ?? []
       if (list.length === 0) continue
-      const note = ev === 'SessionStart' ? ' ⚠（当前版本未触发，待实现）' : ''
+      const note = ev === 'SessionStart' ? '（会话启动时触发）' : ''
       lines.push(`【${ev}】${note}`)
       for (const h of list) {
         lines.push(`  • matcher: ${h.matcher ?? '*'}  timeout: ${h.timeout ?? 10000}ms`)

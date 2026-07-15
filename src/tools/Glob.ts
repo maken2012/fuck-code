@@ -3,6 +3,7 @@
 // 深度比对第 23 轮: 路径校验 + 截断引导 + 耗时统计 + VCS 排除（对标 Claude Code）
 import { buildTool } from '@/tools/Tool.js'
 import { stat } from 'node:fs/promises'
+import { getAllSearchDirs } from '@/tools/extraDirs.js'
 import { z } from 'zod'
 
 const GlobInput = z.object({
@@ -39,23 +40,29 @@ export const GlobTool = buildTool<GlobInputType>({
   async execute(input, ctx) {
     const startTime = Date.now()
     try {
-      const root = input.path ?? ctx.cwd
+      // v1.13: 显式 path 只搜该目录；否则搜 主 cwd + 额外目录（多目录工作区）
+      const roots = input.path ? [input.path] : getAllSearchDirs(ctx.cwd)
 
-      // 深度比对第 23 轮: 路径校验
-      try {
-        const stats = await stat(root)
-        if (!stats.isDirectory()) {
-          return { ok: false, error: `${root} 不是目录（Glob 需要搜索目录）`, isError: true }
+      // 深度比对第 23 轮: 路径校验（每个 root 都校验）
+      for (const root of roots) {
+        try {
+          const stats = await stat(root)
+          if (!stats.isDirectory()) {
+            return { ok: false, error: `${root} 不是目录（Glob 需要搜索目录）`, isError: true }
+          }
+        } catch {
+          return { ok: false, error: `路径不存在: ${root}`, isError: true }
         }
-      } catch {
-        return { ok: false, error: `路径不存在: ${root}`, isError: true }
       }
 
       const g = new Bun.Glob(input.pattern)
       const matches: string[] = []
-      for await (const path of g.scan({ cwd: root, absolute: false })) {
-        if (!/\.(git|svn|hg|bzr)\//.test(path) && !/^\.(git|svn|hg|bzr)$/.test(path)) {
-          matches.push(path)
+      for (const root of roots) {
+        for await (const path of g.scan({ cwd: root, absolute: false })) {
+          if (!/\.(git|svn|hg|bzr)\//.test(path) && !/^\.(git|svn|hg|bzr)$/.test(path)) {
+            // 多目录时用 "dir:path" 前缀区分来源
+            matches.push(roots.length > 1 ? `${root.replace(/^.*\//, '')}: ${path}` : path)
+          }
         }
       }
       if (matches.length === 0) {

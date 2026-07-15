@@ -42,6 +42,9 @@ export async function startRepl(opts: StartReplOpts = {}): Promise<void> {
       process.stderr.write(`\x1b[2m连接 ${serverCount} 个 MCP server...\x1b[0m\n`)
       const result = await connectAllMcpServers(mcpConfig)
       mcpToolsCount = result.tools.length
+      // v1.13: 存入 McpState 单例，让 /mcp 命令能读取/管理运行时连接
+      const { setMcpConnections } = await import('@/mcp/McpState.js')
+      setMcpConnections(result.connections)
       if (mcpToolsCount > 0) {
         process.stderr.write(`\x1b[2m✓ MCP: 加载 ${mcpToolsCount} 个工具（${result.connections.map((c) => c.name).join(', ')}）\x1b[0m\n`)
       }

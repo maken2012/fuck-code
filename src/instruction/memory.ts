@@ -8,7 +8,7 @@
 //
 // 加载：启动时读 MEMORY.md，把所有记忆的 name+description 注入 system prompt。
 // v1.5 简化版全量注入（v1.6 加 findRelevantMemories 按相关性筛选，照 Claude Code side-query）。
-import { readFile, stat, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, stat, writeFile, mkdir, unlink } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 export interface Memory {
@@ -138,6 +138,18 @@ type: ${type}
 ${content}`
   await writeFile(filePath, fileContent, 'utf8')
   return filePath
+}
+
+// 删除记忆（删 .md 文件）。返回 true=已删除，false=不存在。
+export async function deleteMemory(cwd: string, name: string): Promise<boolean> {
+  const filePath = resolve(cwd, MEMORY_DIR, `${name}.md`)
+  try {
+    await stat(filePath)
+  } catch {
+    return false // 文件不存在
+  }
+  await unlink(filePath)
+  return true
 }
 
 // 生成初始 MEMORY.md 索引模板

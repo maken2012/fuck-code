@@ -10,7 +10,7 @@
 //   /sessions 列出历史会话；/resume [N] 恢复历史会话（替换 chatHistoryRef + sessionId）。
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Box, Text, useInput, useApp } from 'ink'
-import type { ChatMessage } from '@/llm/types.js'
+import type { ChatMessage, ContentBlock } from '@/llm/types.js'
 import { queryLoop } from '@/agent/queryLoop.js'
 import { buildSystemPrompt } from '@/agent/systemPrompt.js'
 import { PLAN_MODE_INSTRUCTION } from '@/agent/planPrompt.js'
@@ -32,7 +32,7 @@ import { listCheckpoints, restoreCheckpoint } from '@/tools/checkpoint.js'
 import type { Checkpoint } from '@/tools/checkpoint.js'
 import { loadPromptHistory, appendPromptHistory } from '@/services/PromptHistory.js'
 import { diffText, formatDiff } from '@/utils/diff.js'
-import { estimateTokens } from '@/utils/tokens.js'
+import { estimateTokens, estimateMessagesTokens } from '@/utils/tokens.js'
 import { readFile, mkdir } from 'node:fs/promises'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -70,6 +70,15 @@ const ALL_COMMANDS: { cmd: string; desc: string; args?: string; example?: string
   { cmd: '/snapshot', desc: '创建会话快照', args: '<标签>', example: '/snapshot 重构前' },
   { cmd: '/export', desc: '导出会话为 markdown', args: '', example: '/export' },
   { cmd: '/version', desc: '显示版本号', args: '', example: '/version' },
+  { cmd: '/compact', desc: '手动触发上下文压缩', args: '', example: '/compact' },
+  { cmd: '/memory', desc: '查看/增删记忆', args: '[add <名> <类型> <内容> | delete <名>]', example: '/memory 或 /memory add vue-style preference "用 <style scoped>"' },
+  { cmd: '/hooks', desc: '查看 hook 配置', args: '', example: '/hooks' },
+  { cmd: '/status', desc: '一屏查看运行状态', args: '', example: '/status' },
+  { cmd: '/doctor', desc: '环境诊断', args: '', example: '/doctor' },
+  { cmd: '/review', desc: '对本会话改动做代码审查', args: '', example: '/review' },
+  { cmd: '/mcp', desc: '查看/管理 MCP server', args: '[reconnect <名> | disconnect <名> | tools <名>]', example: '/mcp 或 /mcp tools github' },
+  { cmd: '/permissions', desc: '查看/修改权限规则', args: '[add <allow|ask|deny> <规则> | remove <组> <序号> | mode <模式>]', example: '/permissions 或 /permissions add allow "Bash(git *)"' },
+  { cmd: '/add-dir', desc: '添加额外工作目录', args: '[<目录路径>]', example: '/add-dir ../other-project' },
   { cmd: '/exit', desc: '退出 fuckcode', args: '', example: '/exit' },
   { cmd: '/quit', desc: '退出 fuckcode', args: '', example: '/quit' },
 ]
@@ -194,6 +203,8 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const pendingPermissionRef = useRef<PendingPermission | null>(null)
   // M5：/sessions 列表展示的最近会话（/resume N 取第 N 项）
   const sessionsListRef = useRef<SessionMeta[]>([])
+  // v1.13: /add-dir 多目录工作区（Glob/Grep 跨目录搜索）
+  const extraDirsRef = useRef<Set<string>>(new Set())
 
   // 启动时读一次 config + 创建 session（异步，失败用默认值）
   useEffect(() => {
@@ -933,6 +944,384 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
     setHistory((h) => [...h, { role: 'assistant' as const, text: `本会话改动（${byFile.size} 个文件）：\n\n${diffs.join('\n\n').slice(0, 5000)}` }])
   }
 
+  // v1.13: /compact 手动触发上下文压缩（复刻 queryLoop autoCompact 逻辑）
+  async function handleCompactCommand(): Promise<void> {
+    if (!sessionId) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '[FAIL] 无活跃会话，无法压缩（需先发一条消息建立会话）' }])
+      return
+    }
+    const config = configRef.current
+    const messages = chatHistoryRef.current
+    if (messages.length === 0) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '当前无对话上下文，无需压缩' }])
+      return
+    }
+    const beforeTokens = estimateMessagesTokens(messages)
+    setHistory((h) => [...h, { role: 'assistant' as const, text: '[ .. ] 正在压缩上下文…' }])
+    try {
+      const { compactConversation } = await import('@/agent/compact.js')
+      const { writeCompactBoundary } = await import('@/services/Session.js')
+      const ac = new AbortController()
+      const summary = await compactConversation(messages, {
+        model: config?.model ?? currentModel,
+        ...(config?.apiKey ? { apiKey: config.apiKey } : {}),
+        ...(config?.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+        signal: ac.signal,
+      }).catch(() => '')
+      // 写 boundary 到磁盘
+      await writeCompactBoundary(sessionId, process.cwd(), summary).catch(() => {})
+      // 替换内存 messages 为单条 boundary message（与 queryLoop 内部一致）
+      const boundaryText = `<compact>之前对话的摘要:\n${summary}</compact>`
+      chatHistoryRef.current = [{
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: boundaryText,
+          _meta: { compactBoundary: true },
+        } as ContentBlock & { _meta: { compactBoundary: boolean } }],
+      }]
+      const afterTokens = estimateTokens(summary)
+      setHistory((h) => [...h, {
+        role: 'assistant' as const,
+        text: `[ OK ] 上下文已压缩：${beforeTokens} → ${afterTokens} tokens（省 ${beforeTokens - afterTokens}）\n\n${summary.slice(0, 500)}${summary.length > 500 ? '...' : ''}`,
+      }])
+    } catch (e) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 压缩失败: ${String(e)}` }])
+    }
+  }
+
+  // v1.13: /memory 查看/增删记忆
+  async function handleMemoryCommand(args: string): Promise<void> {
+    const { loadMemories, saveMemory, deleteMemory } = await import('@/instruction/memory.js')
+    const cwd = process.cwd()
+    if (args.startsWith('add ')) {
+      // /memory add <name> <type> <content>
+      const rest = args.slice(4).trim()
+      // 解析：name（第一词） type（第二词） content（剩余）
+      const sp1 = rest.indexOf(' ')
+      if (sp1 === -1) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: '用法：/memory add <name> <type> <content>\ntype: preference/project/feedback/reference' }])
+        return
+      }
+      const name = rest.slice(0, sp1)
+      const rest2 = rest.slice(sp1 + 1).trim()
+      const sp2 = rest2.indexOf(' ')
+      if (sp2 === -1) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: '用法：/memory add <name> <type> <content>' }])
+        return
+      }
+      const type = rest2.slice(0, sp2).trim() as 'preference' | 'project' | 'feedback' | 'reference'
+      const content = rest2.slice(sp2 + 1).trim()
+      const validTypes = ['preference', 'project', 'feedback', 'reference']
+      if (!validTypes.includes(type)) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 无效 type: ${type}（可选: ${validTypes.join('/')}）` }])
+        return
+      }
+      const path = await saveMemory(cwd, name, '', type, content)
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 记忆已保存: ${name} (${type})\n${path}` }])
+      return
+    }
+    if (args.startsWith('delete ')) {
+      const name = args.slice(7).trim()
+      const deleted = await deleteMemory(cwd, name)
+      setHistory((h) => [...h, { role: 'assistant' as const, text: deleted ? `[ OK ] 已删除记忆: ${name}` : `[FAIL] 记忆不存在: ${name}` }])
+      return
+    }
+    // 无参：列出所有记忆
+    const memories = await loadMemories(cwd)
+    if (memories.length === 0) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '没有记忆。添加：/memory add <name> <type> <content>' }])
+      return
+    }
+    const typeLabel: Record<string, string> = { preference: '偏好', project: '项目', feedback: '反馈', reference: '参考' }
+    const list = memories.map((m, i) =>
+      `  ${i + 1}. [${typeLabel[m.type] ?? m.type}] ${m.name}\n     ${m.description || m.content.slice(0, 60)}`,
+    ).join('\n')
+    setHistory((h) => [...h, { role: 'assistant' as const, text: `记忆列表（${memories.length} 条）：\n\n${list}\n\n删除：/memory delete <name>` }])
+  }
+
+  // v1.13: /hooks 查看 hook 配置
+  async function handleHooksCommand(): Promise<void> {
+    const { loadHooks } = await import('@/hooks/HookManager.js')
+    const cwd = process.cwd()
+    const hooksFile = await loadHooks(cwd)
+    const hooks = hooksFile.hooks ?? {}
+    const eventNames: Array<'PreToolUse' | 'PostToolUse' | 'UserPromptSubmit' | 'SessionStart'> = [
+      'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart',
+    ]
+    const lines: string[] = []
+    for (const ev of eventNames) {
+      const list = hooks[ev] ?? []
+      if (list.length === 0) continue
+      const note = ev === 'SessionStart' ? ' ⚠（当前版本未触发，待实现）' : ''
+      lines.push(`【${ev}】${note}`)
+      for (const h of list) {
+        lines.push(`  • matcher: ${h.matcher ?? '*'}  timeout: ${h.timeout ?? 10000}ms`)
+        lines.push(`    command: ${h.command}`)
+      }
+    }
+    if (lines.length === 0) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '没有配置 hook（.fuckcode/hooks.json）。\n\nhook 格式见文档：每条 { matcher, command, timeout }' }])
+      return
+    }
+    setHistory((h) => [...h, { role: 'assistant' as const, text: `Hook 配置：\n\n${lines.join('\n')}` }])
+  }
+
+  // v1.13: /status 一屏状态汇总
+  async function handleStatusCommand(): Promise<void> {
+    const config = configRef.current
+    const tokens = totalTokensRef.current
+    const contextUsed = estimateMessagesTokens(chatHistoryRef.current)
+    const contextWindow = config?.contextWindow ?? 200000
+    const contextPct = Math.round((contextUsed / contextWindow) * 100)
+    const lines = [
+      `  模型：${currentModel}`,
+      `  权限模式：${config?.permissionMode ?? 'default'}`,
+      `  上下文：${contextUsed} / ${contextWindow} tokens（${contextPct}%）`,
+      `  累计用量：输入 ${tokens.input} / 输出 ${tokens.output} / 缓存读 ${tokens.cacheRead}`,
+      `  会话 ID：${sessionId ?? '(无)'}`,
+      `  工作目录：${process.cwd()}`,
+    ]
+    // MCP 状态
+    try {
+      const { getMcpConnections, isMcpInitialized } = await import('@/mcp/McpState.js')
+      const conns = getMcpConnections()
+      if (isMcpInitialized()) {
+        lines.push(`  MCP：${conns.length} 个 server${conns.length > 0 ? '（' + conns.map((c) => `${c.name}(${c.tools.length})`).join(', ') + '）' : ''}`)
+      }
+    } catch { /* McpState 不可用忽略 */ }
+    setHistory((h) => [...h, { role: 'assistant' as const, text: `运行状态：\n\n${lines.join('\n')}` }])
+  }
+
+  // v1.13: /doctor 环境诊断
+  async function handleDoctorCommand(): Promise<void> {
+    const { stat } = await import('node:fs/promises')
+    const { resolve } = await import('node:path')
+    const cwd = process.cwd()
+    const config = configRef.current
+    const checks: string[] = []
+    const ok = (label: string, detail = '') => checks.push(`  ✅ ${label}${detail ? ' — ' + detail : ''}`)
+    const warn = (label: string, detail = '') => checks.push(`  ⚠ ${label}${detail ? ' — ' + detail : ''}`)
+    const fail = (label: string, detail = '') => checks.push(`  ❌ ${label}${detail ? ' — ' + detail : ''}`)
+
+    // apiKey
+    if (config?.apiKey) ok('API Key 已配置')
+    else fail('API Key 未配置', '无法调用 LLM，配置 ~/.fuckcode/config.json 的 apiKey')
+    // apiBaseUrl
+    if (config?.apiBaseUrl) ok('API Base URL', config.apiBaseUrl)
+    // Bun 版本
+    ok('Bun', `v${Bun.version}`)
+    // TTY
+    if (process.stdin.isTTY) ok('交互式终端 (TTY)')
+    else warn('非 TTY 环境', 'headless 模式可用 -p flag')
+    // .fuckcode 目录
+    const fcDir = resolve(cwd, '.fuckcode')
+    try { await stat(fcDir); ok('.fuckcode 目录存在') } catch { warn('.fuckcode 目录不存在', '某些功能（会话/MCP/memory）会按需创建') }
+    // AGENTS.md
+    for (const f of ['AGENTS.md', 'CLAUDE.md']) {
+      try { await stat(resolve(cwd, f)); ok(`${f} 存在`); break } catch { /* continue */ }
+    }
+    // MCP 配置
+    try {
+      const { loadMcpConfig } = await import('@/mcp/McpClient.js')
+      const mc = await loadMcpConfig(cwd)
+      const count = mc.mcpServers ? Object.keys(mc.mcpServers).length : 0
+      if (count > 0) {
+        const { getMcpConnections } = await import('@/mcp/McpState.js')
+        const connected = getMcpConnections().length
+        ok('MCP', `${count} 个配置，${connected} 个已连接`)
+      } else {
+        warn('无 MCP 配置', '.fuckcode/mcp.json 不存在或为空')
+      }
+    } catch { warn('MCP 配置读取失败') }
+
+    setHistory((h) => [...h, { role: 'assistant' as const, text: `环境诊断：\n\n${checks.join('\n')}` }])
+  }
+
+  // v1.13: /review 对本会话改动做代码审查
+  async function handleReviewCommand(): Promise<void> {
+    const checkpoints = await listCheckpoints(process.cwd())
+    if (checkpoints.length === 0) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '没有改动记录。用 Edit/Write 改完文件后再 /review' }])
+      return
+    }
+    const byFile = new Map<string, Checkpoint>()
+    for (const cp of checkpoints) {
+      if (!byFile.has(cp.originalPath)) byFile.set(cp.originalPath, cp)
+    }
+    const diffs: string[] = []
+    for (const [filePath, cp] of byFile) {
+      try {
+        const oldContent = await readFile(cp.checkpointPath, 'utf8')
+        const newContent = await readFile(filePath, 'utf8').catch(() => '(文件已删除)')
+        const d = diffText(oldContent, newContent)
+        const shortPath = filePath.replace(process.cwd() + '/', '')
+        diffs.push(`### ${shortPath}\n${formatDiff(d, 3)}`)
+      } catch { /* skip */ }
+    }
+    const diffTextAll = diffs.join('\n\n').slice(0, 12000)
+    setHistory((h) => [...h, { role: 'assistant' as const, text: '[ .. ] 正在审查改动…' }])
+    try {
+      const { streamMessage } = await import('@/llm/provider.js')
+      const config = configRef.current
+      const ac = new AbortController()
+      let review = ''
+      for await (const event of streamMessage({
+        model: config?.model ?? currentModel,
+        system: '你是严格的代码审查员。审查以下 git diff，找出：bug、安全问题、性能问题、风格问题、改进建议。按"严重/建议"分类，每条给文件+行号。简洁直接，不寒暄。',
+        messages: [{ role: 'user', content: `请审查这些改动：\n\n${diffTextAll}` }],
+        signal: ac.signal,
+        ...(config?.apiKey ? { apiKey: config.apiKey } : {}),
+        ...(config?.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
+        ...(config?.provider ? { provider: config.provider } : {}),
+      })) {
+        if (event.type === 'text') review += event.textDelta
+      }
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `代码审查结果：\n\n${review || '(无输出)'}` }])
+    } catch (e) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 审查失败: ${String(e)}` }])
+    }
+  }
+
+  // v1.13: /mcp 查看/管理 MCP server
+  async function handleMcpCommand(args: string): Promise<void> {
+    const { getMcpConnections, findMcpConnection, removeMcpConnection, upsertMcpConnection } = await import('@/mcp/McpState.js')
+    const { disconnectOne, reconnectOne, loadMcpConfig, checkConnectionHealth } = await import('@/mcp/McpClient.js')
+    const cwd = process.cwd()
+
+    if (args.startsWith('tools ')) {
+      const name = args.slice(6).trim()
+      const conn = findMcpConnection(name)
+      if (!conn) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 未连接 server: ${name}` }])
+        return
+      }
+      const list = conn.tools.map((t) => `  • ${t.name}`).join('\n')
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `${name} 的工具（${conn.tools.length} 个）：\n${list}` }])
+      return
+    }
+    if (args.startsWith('disconnect ')) {
+      const name = args.slice(11).trim()
+      const conns = getMcpConnections()
+      const ok = await disconnectOne(conns, name)
+      if (ok) { removeMcpConnection(name); setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 已断开 ${name}` }]) }
+      else { setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 未找到 server: ${name}` }]) }
+      return
+    }
+    if (args.startsWith('reconnect ')) {
+      const name = args.slice(10).trim()
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `[ .. ] 正在重连 ${name}…` }])
+      try {
+        const mc = await loadMcpConfig(cwd)
+        const conn = await reconnectOne(mc, name)
+        upsertMcpConnection(conn)
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 已重连 ${name}（${conn.tools.length} 个工具）` }])
+      } catch (e) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 重连失败: ${String(e)}` }])
+      }
+      return
+    }
+    // 无参：列出连接状态（含健康探活）
+    const conns = getMcpConnections()
+    if (conns.length === 0) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '没有已连接的 MCP server。\n配置 .fuckcode/mcp.json 后重启，或 /mcp reconnect <name>' }])
+      return
+    }
+    const lines: string[] = []
+    for (const conn of conns) {
+      const health = await checkConnectionHealth(conn)
+      const icon = health === 'connected' ? '✅' : '❌'
+      lines.push(`  ${icon} ${conn.name}（${conn.tools.length} 个工具）`)
+    }
+    setHistory((h) => [...h, { role: 'assistant' as const, text: `MCP server（${conns.length} 个）：\n\n${lines.join('\n')}\n\n管理：/mcp reconnect <name> | /mcp disconnect <name> | /mcp tools <name>` }])
+  }
+
+  // v1.13: /permissions 查看/修改权限规则
+  async function handlePermissionsCommand(args: string): Promise<void> {
+    const config = configRef.current
+    if (!config) {
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '[FAIL] 配置未加载' }])
+      return
+    }
+    const { saveConfig } = await import('@/services/Config.js')
+
+    if (args.startsWith('mode ')) {
+      const mode = args.slice(5).trim() as typeof config.permissionMode
+      const valid = ['default', 'acceptEdits', 'plan', 'bypassPermissions']
+      if (!valid.includes(mode)) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 无效模式。可选: ${valid.join('/')}` }])
+        return
+      }
+      config.permissionMode = mode
+      await saveConfig({ permissionMode: mode }, 'user').catch((e: unknown) => setHistory((h) => [...h, { role: 'assistant' as const, text: `⚠ 持久化失败: ${String(e)}` }]))
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 权限模式 = ${mode}（已持久化）` }])
+      return
+    }
+    if (args.startsWith('add ')) {
+      // /permissions add <allow|ask|deny> <规则>
+      const rest = args.slice(4).trim()
+      const sp = rest.indexOf(' ')
+      if (sp === -1) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: '用法：/permissions add <allow|ask|deny> <规则>' }])
+        return
+      }
+      const group = rest.slice(0, sp).trim()
+      const rule = rest.slice(sp + 1).trim()
+      const arr = group === 'allow' ? config.permissions.allow : group === 'ask' ? config.permissions.ask : group === 'deny' ? config.permissions.deny : null
+      if (!arr) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 无效组: ${group}（可选 allow/ask/deny）` }])
+        return
+      }
+      arr.push(rule)
+      await saveConfig({ permissions: config.permissions }, 'user').catch(() => {})
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 已添加 ${group} 规则: ${rule}` }])
+      return
+    }
+    if (args.startsWith('remove ')) {
+      // /permissions remove <allow|ask|deny> <序号>
+      const rest = args.slice(7).trim()
+      const sp = rest.indexOf(' ')
+      if (sp === -1) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: '用法：/permissions remove <allow|ask|deny> <序号>' }])
+        return
+      }
+      const group = rest.slice(0, sp).trim()
+      const idx = parseInt(rest.slice(sp + 1)) - 1
+      const arr = group === 'allow' ? config.permissions.allow : group === 'ask' ? config.permissions.ask : group === 'deny' ? config.permissions.deny : null
+      if (!arr || idx < 0 || idx >= arr.length) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 无效组或序号` }])
+        return
+      }
+      const removed = arr.splice(idx, 1)[0]
+      await saveConfig({ permissions: config.permissions }, 'user').catch(() => {})
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 已删除 ${group}[${idx + 1}]: ${removed}` }])
+      return
+    }
+    // 无参：展示当前规则
+    const fmt = (label: string, arr: string[]) =>
+      arr.length > 0 ? `  【${label}】\n${arr.map((r, i) => `    ${i + 1}. ${r}`).join('\n')}` : `  【${label}】（空）`
+    setHistory((h) => [...h, {
+      role: 'assistant' as const,
+      text: `权限模式：${config.permissionMode}\n\n${fmt('allow', config.permissions.allow)}\n${fmt('ask', config.permissions.ask)}\n${fmt('deny', config.permissions.deny)}\n\n修改：/permissions add <allow|ask|deny> <规则> | /permissions remove <组> <序号> | /permissions mode <模式>`,
+    }])
+  }
+
+  // v1.13: /add-dir 多目录工作区
+  async function handleAddDirCommand(args: string): Promise<void> {
+    const { addExtraDir, getExtraDirs } = await import('@/tools/extraDirs.js')
+    if (!args) {
+      const dirs = getExtraDirs()
+      setHistory((h) => [...h, {
+        role: 'assistant' as const,
+        text: `工作目录：\n  • ${process.cwd()}（主）${dirs.length > 0 ? '' : '\n\n添加：/add-dir <路径>'}${dirs.map((d, i) => `\n  ${i + 1}. ${d}`).join('')}`,
+      }])
+      return
+    }
+    const abs = addExtraDir(args)
+    extraDirsRef.current.add(abs)
+    setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 已添加工作目录: ${abs}\n（Glob/Grep 将跨目录搜索；共 ${getExtraDirs().length + 1} 个目录）` }])
+  }
+
   // v1.1: 自定义斜杠命令（.fuckcode/commands/*.md）
   async function handleCustomCommand(name: string, args: string): Promise<void> {
     const commands = await loadCustomCommands(process.cwd())
@@ -1337,6 +1726,60 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         setInput('')
         setCursorOffset(0)
       },
+    )
+    // v1.13: /compact 手动触发上下文压缩
+    reg.register(
+      { cmd: '/compact', desc: '手动压缩上下文', args: '', example: '/compact' },
+      () => { void handleCompactCommand(); setInput(''); setCursorOffset(0) },
+      { requiresRunning: false },
+    )
+    // v1.13: /memory 查看/增删记忆
+    reg.register(
+      { cmd: '/memory', desc: '查看/增删记忆', args: '[add|delete ...]', example: '/memory' },
+      (args) => { void handleMemoryCommand(args); setInput(''); setCursorOffset(0) },
+      { requiresRunning: false },
+    )
+    // v1.13: /hooks 查看 hook 配置
+    reg.register(
+      { cmd: '/hooks', desc: '查看 hook 配置', args: '', example: '/hooks' },
+      () => { void handleHooksCommand(); setInput(''); setCursorOffset(0) },
+      { requiresRunning: false },
+    )
+    // v1.13: /status 一屏状态汇总
+    reg.register(
+      { cmd: '/status', desc: '查看运行状态', args: '', example: '/status' },
+      () => { void handleStatusCommand(); setInput(''); setCursorOffset(0) },
+      { requiresRunning: false },
+    )
+    // v1.13: /doctor 环境诊断
+    reg.register(
+      { cmd: '/doctor', desc: '环境诊断', args: '', example: '/doctor' },
+      () => { void handleDoctorCommand(); setInput(''); setCursorOffset(0) },
+      { requiresRunning: false },
+    )
+    // v1.13: /review 代码审查
+    reg.register(
+      { cmd: '/review', desc: '代码审查', args: '', example: '/review' },
+      () => { void handleReviewCommand(); setInput(''); setCursorOffset(0) },
+      { requiresRunning: false },
+    )
+    // v1.13: /mcp 管理 MCP server
+    reg.register(
+      { cmd: '/mcp', desc: '查看/管理 MCP', args: '[reconnect|disconnect|tools ...]', example: '/mcp' },
+      (args) => { void handleMcpCommand(args); setInput(''); setCursorOffset(0) },
+      { requiresRunning: false },
+    )
+    // v1.13: /permissions 查看/修改权限规则
+    reg.register(
+      { cmd: '/permissions', desc: '查看/修改权限', args: '[add|remove|mode ...]', example: '/permissions' },
+      (args) => { void handlePermissionsCommand(args); setInput(''); setCursorOffset(0) },
+      { requiresRunning: false },
+    )
+    // v1.13: /add-dir 多目录工作区
+    reg.register(
+      { cmd: '/add-dir', desc: '添加工作目录', args: '[<路径>]', example: '/add-dir ../other' },
+      (args) => { handleAddDirCommand(args); setInput(''); setCursorOffset(0) },
+      { requiresRunning: false },
     )
   }
 

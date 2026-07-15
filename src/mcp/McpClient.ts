@@ -212,3 +212,45 @@ export async function disconnectAll(connections: McpConnection[]): Promise<void>
     }),
   )
 }
+
+// v1.13: 断开单个 server（按 name）。返回 true=已断开，false=未找到。
+export async function disconnectOne(connections: McpConnection[], name: string): Promise<boolean> {
+  const conn = connections.find((c) => c.name === name)
+  if (!conn) return false
+  try {
+    await conn.client.close()
+  } catch {
+    // 忽略关闭错误
+  }
+  return true
+}
+
+// v1.13: 重连单个 server。从配置里读 serverConfig，重新 connectMcpServer。
+// 成功返回新连接，失败抛错。调用方负责用 McpState.upsertMcpConnection 更新状态。
+export async function reconnectOne(
+  config: McpConfig,
+  name: string,
+): Promise<McpConnection> {
+  const serverConfig = config.mcpServers?.[name]
+  if (!serverConfig) {
+    throw new Error(`MCP server "${name}" 不在配置中`)
+  }
+  // connectMcpServer 内部已含连接超时 + listTools 超时容错
+  return connectMcpServer(name, serverConfig)
+}
+
+// v1.13: 探活——用 ping 检查连接是否健康。
+// MCP Client 的 ping 方法（带 5s 超时），返回 'connected' | 'error'。
+export async function checkConnectionHealth(conn: McpConnection): Promise<'connected' | 'error'> {
+  try {
+    await Promise.race([
+      conn.client.ping(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('ping 超时')), 5000),
+      ),
+    ])
+    return 'connected'
+  } catch {
+    return 'error'
+  }
+}

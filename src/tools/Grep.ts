@@ -4,6 +4,7 @@
 // + head_limit 分页 + max-columns 防刷屏 + -e 保护 + VCS 目录排除
 import { spawn } from 'node:child_process'
 import { buildTool } from '@/tools/Tool.js'
+import { getAllSearchDirs } from '@/tools/extraDirs.js'
 import { z } from 'zod'
 
 const GrepInput = z.object({
@@ -90,7 +91,9 @@ export const GrepTool = buildTool<GrepInputType>({
       // pattern 以 - 开头时加 -e 防止 rg 当 option 解析
       if (input.pattern.startsWith('-')) args.push('-e', input.pattern)
       else args.push(input.pattern)
-      args.push(input.path ?? ctx.cwd)
+      // v1.13: 多目录工作区——无显式 path 时搜 主 cwd + 额外目录（rg 接受多个路径）
+      const searchPaths = input.path ? [input.path] : getAllSearchDirs(ctx.cwd)
+      args.push(...searchPaths)
 
       const proc = spawn('rg', args, { cwd: ctx.cwd })
       let stdout = ''

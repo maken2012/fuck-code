@@ -9,7 +9,8 @@ test('Task 工具元数据正确', () => {
   expect(TaskTool.description).toContain('子 agent')
   expect(TaskTool.prompt).toContain('subagent_type')
   expect(TaskTool.isReadOnly?.()).toBe(false) // Task 不标记只读（子 agent 可能写）
-  expect(TaskTool.isConcurrencySafe?.()).toBe(false)
+  // v1.13: Task 标记 concurrencySafe=true，多个独立 Task 可并行执行
+  expect(TaskTool.isConcurrencySafe?.()).toBe(true)
   expect(TaskTool.jsonSchema).toBeDefined()
 })
 

@@ -16,6 +16,7 @@ import { AskUserQuestionTool } from '@/tools/AskUserQuestion.js'
 import { LspDiagnosticsTool } from '@/tools/LspDiagnostics.js'
 import { EnterWorktreeTool, ExitWorktreeTool } from '@/tools/Worktree.js'
 import { SkillTool } from '@/tools/Skill.js'
+import { NotebookEditTool } from '@/tools/NotebookEdit.js'
 import { loadDynamicTools } from '@/tools/dynamicLoader.js'
 
 // 所有内置工具
@@ -30,6 +31,7 @@ export function getAllTools(): Tool[] {
     LspDiagnosticsTool,                     // v1.7 LSP 诊断
     EnterWorktreeTool, ExitWorktreeTool,    // v1.9 git worktree
     SkillTool,                              // v1.12 skill 按需加载
+    NotebookEditTool,                       // v1.13 Jupyter notebook 编辑
   ]
 }
 

@@ -3,7 +3,7 @@
 // 设计：对外暴露 loadConfig() async 函数 + Config Effect Service（runtime 用）。
 import { Context, Effect, Layer } from 'effect'
 import { z } from 'zod'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, writeFile, stat, mkdir, rename } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { configPath } from '@/services/Paths.js'
 
@@ -81,6 +81,43 @@ export async function loadConfig(opts?: { cwd?: string }): Promise<ConfigValue> 
   // 合并顺序：默认 < user < project
   const defaults = ConfigSchema.parse({})
   return deepMerge(defaults, userRaw, projectRaw)
+}
+
+// 写盘：把 partial 合并进目标 scope 的 config 文件后原子写回。
+// scope='user' 写 ~/.fuckcode/config.json，scope='project' 写 <cwd>/.fuckcode/config.json。
+// 只做"单文件层合并"（partial 覆盖该文件现有内容），不跨层合并。
+// permissions 子对象特殊处理（深合并 allow/ask/deny），其余字段浅覆盖。
+export async function saveConfig(
+  partial: Partial<ConfigValue>,
+  scope: 'user' | 'project' = 'user',
+  opts?: { cwd?: string },
+): Promise<void> {
+  const targetPath =
+    scope === 'user' ? configPath() : resolve(opts?.cwd ?? process.cwd(), '.fuckcode', 'config.json')
+
+  // 读该文件现有内容（不存在按空处理）
+  const existing = await readConfigFile(targetPath)
+
+  // 合并 partial 到 existing：permissions 深合并，其余浅覆盖
+  const merged: Record<string, unknown> = { ...existing }
+  for (const [key, value] of Object.entries(partial)) {
+    if (key === 'permissions' && existing.permissions && value && typeof value === 'object') {
+      merged.permissions = {
+        allow: (value as ConfigValue['permissions']).allow ?? existing.permissions?.allow ?? [],
+        ask: (value as ConfigValue['permissions']).ask ?? existing.permissions?.ask ?? [],
+        deny: (value as ConfigValue['permissions']).deny ?? existing.permissions?.deny ?? [],
+      }
+    } else {
+      merged[key] = value
+    }
+  }
+
+  // 确保目录存在 + 原子写（.tmp → rename，避免半写损坏）
+  const dir = resolve(targetPath, '..')
+  await mkdir(dir, { recursive: true }).catch(() => {})
+  const tmpPath = targetPath + '.tmp'
+  await writeFile(tmpPath, JSON.stringify(merged, null, 2), 'utf8')
+  await rename(tmpPath, targetPath)
 }
 
 // === Effect Layer（runtime.ts 用） ===

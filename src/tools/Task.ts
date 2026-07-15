@@ -71,7 +71,8 @@ export const TaskTool = buildTool<TaskInputType>({
 使用建议：
 - prompt 里说清"要找什么/要做什么/结果格式要求"
 - 不要派子 agent 做你自己几步就能完成的小任务
-- 多个独立任务可以连续派多个子 agent（它们各自隔离）`,
+- 多个独立任务可以连续派多个子 agent（它们各自隔离）
+- 多个互相独立的 Task 可在同一次回复里并行派发——它们会真正并行执行（各自的 queryLoop），大幅缩短调研时间`,
   inputSchema: TaskInput,
   jsonSchema: {
     type: 'object',
@@ -85,7 +86,11 @@ export const TaskTool = buildTool<TaskInputType>({
   // Task 本身是"读"操作（它调研），但内部子 agent 可能写（general 类型）
   // 保守起见不标记 isReadOnly，让权限管线对 Task 本身 ask
   isReadOnly: () => false,
-  isConcurrencySafe: () => false,
+  // v1.13: 标记 concurrencySafe=true，让多个独立 Task 在同一轮里并行执行。
+  // ToolExecutor 的 Promise.all 并发组会真正并行跑各自的子 agent queryLoop。
+  // 安全性：每个 Task.execute 内部 new 独立的 AbortController + 独立 readFileState（子 queryLoop 各自创建），
+  // 子 session 各自 createSession，互不共享可变状态。fork 模式共享 parentHistory 只读。
+  isConcurrencySafe: () => true,
 
   async execute(input, ctx) {
     const subagentType = input.subagent_type ?? 'explore'

@@ -69,4 +69,4 @@ Service 层 (services/, Effect.ts Context.Tag + Layer)
 
 ## 版本
 
-当前 v1.12.0（见 `src/version.ts`）。15 个工具，19 个命令，252 tests。
+当前 v1.17.0（见 `src/version.ts`）。16 个工具（+NotebookEdit），31 个命令（+/compact /memory /hooks /status /doctor /review /mcp /permissions /add-dir /emacs），362 tests。

@@ -70,9 +70,10 @@ export const EnterWorktreeTool = buildTool<EnterWorktreeInputType>({
 
     const isGit = await isGitRepo(ctx.cwd)
     if (!isGit) {
-      // 非 git：创建普通子目录
+      // 非 git：创建普通子目录 + 切 cwd
       await mkdir(worktreeDir, { recursive: true })
-      return { ok: true, data: `已创建工作目录（非 git，无分支隔离）：${worktreeDir}\n注意：未切换 cwd（需手动 cd）。` }
+      process.chdir(worktreeDir)
+      return { ok: true, data: `已创建工作目录并切换过去（非 git，无分支隔离）：${worktreeDir}\ncwd 已切换，后续工具在此目录工作。` }
     }
 
     // git worktree add
@@ -80,9 +81,11 @@ export const EnterWorktreeTool = buildTool<EnterWorktreeInputType>({
     if (!r.ok) {
       return { ok: false, error: `git worktree add 失败: ${r.stderr}`, isError: true }
     }
+    // v1.13: 真正切换运行时 cwd（process.chdir 影响所有读 process.cwd() 的工具）
+    process.chdir(worktreeDir)
     return {
       ok: true,
-      data: `✓ 已创建 worktree\n分支: ${branch}\n路径: ${worktreeDir}\n用 ExitWorktree 回到主目录。`,
+      data: `✓ 已创建 worktree 并切换工作目录\n分支: ${branch}\n路径: ${worktreeDir}\ncwd 已切换。用 ExitWorktree 回到主目录（${mainWorktree}）。`,
     }
   },
 })
@@ -101,10 +104,14 @@ export const ExitWorktreeTool = buildTool<void>({
     if (!mainWorktree) {
       return { ok: true, data: '当前不在 worktree 中（未调用过 EnterWorktree）' }
     }
+    // v1.13: 真正切回主工作目录（process.chdir）
+    process.chdir(mainWorktree)
+    const returned = mainWorktree
+    mainWorktree = null
     void ctx
     return {
       ok: true,
-      data: `主工作目录：${mainWorktree}\n请手动 cd 回去（或重启 fuckcode）。worktree 内容保留在 .fuckcode/worktrees/。`,
+      data: `✓ 已切换回主工作目录：${returned}\nworktree 内容保留在 .fuckcode/worktrees/（用 git worktree remove 清理）。`,
     }
   },
 })

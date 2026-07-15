@@ -5,8 +5,14 @@ import { resolve } from 'node:path'
 import { EnterWorktreeTool, ExitWorktreeTool } from '@/tools/Worktree.js'
 
 const tmpDir = resolve(process.env.TMPDIR || '/tmp', 'fc-wt-test-' + process.pid)
+// v1.13: EnterWorktree 现在 process.chdir 切 cwd，测试必须在 afterEach 恢复原 cwd
+// 否则会污染同一 bun test 进程的其他测试（如 eval 读相对路径的任务文件）
+const originalCwd = process.cwd()
 beforeEach(async () => { await mkdir(tmpDir, { recursive: true }) })
-afterEach(async () => { await rm(tmpDir, { recursive: true, force: true }) })
+afterEach(async () => {
+  process.chdir(originalCwd)
+  await rm(tmpDir, { recursive: true, force: true })
+})
 
 test('EnterWorktree 元数据', () => {
   expect(EnterWorktreeTool.name).toBe('EnterWorktree')

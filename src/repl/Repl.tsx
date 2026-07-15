@@ -79,6 +79,7 @@ const ALL_COMMANDS: { cmd: string; desc: string; args?: string; example?: string
   { cmd: '/mcp', desc: '查看/管理 MCP server', args: '[reconnect <名> | disconnect <名> | tools <名>]', example: '/mcp 或 /mcp tools github' },
   { cmd: '/permissions', desc: '查看/修改权限规则', args: '[add <allow|ask|deny> <规则> | remove <组> <序号> | mode <模式>]', example: '/permissions 或 /permissions add allow "Bash(git *)"' },
   { cmd: '/add-dir', desc: '添加额外工作目录', args: '[<目录路径>]', example: '/add-dir ../other-project' },
+  { cmd: '/emacs', desc: '查看 emacs 编辑快捷键', args: '', example: '/emacs' },
   { cmd: '/exit', desc: '退出 fuckcode', args: '', example: '/exit' },
   { cmd: '/quit', desc: '退出 fuckcode', args: '', example: '/quit' },
 ]
@@ -237,6 +238,16 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
       .finally(() => setConfigLoaded(true))
     // 创建初始 session（失败不致命：queryLoop 不传 sessionId 仍能跑）
     createSession(process.cwd()).then(setSessionId).catch(() => {})
+    // v1.13: 触发 SessionStart hook（对标 Claude Code SessionStart 事件）
+    if (process.env.FUCKCODE_SAFE_MODE !== '1') {
+      import('@/hooks/HookManager.js')
+        .then(({ loadHooks, triggerHooks }) =>
+          loadHooks(process.cwd()).then((hooks) =>
+            triggerHooks('SessionStart', {}, hooks, process.cwd()).catch(() => {}),
+          ),
+        )
+        .catch(() => {}) // hook 失败不阻塞启动
+    }
     // v1.7: 加载跨会话输入历史（inputHistoryRef 用"旧在前"顺序，loadPromptHistory 返回"最近在前"，需反转）
     loadPromptHistory(process.cwd())
       .then((hist) => { inputHistoryRef.current = hist.slice().reverse() })
@@ -733,15 +744,52 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   }
 
   // v1.6: /rewind 列出/恢复文件 checkpoint（Edit/Write 前自动备份）
+  // v1.13: 增强——支持对话回滚（/rewind conv <序号>，复用会话快照机制）
   async function handleRewindCommand(text: string): Promise<void> {
     const parts = text.split(/\s+/)
+    // v1.13: /rewind conv <N> 回滚对话到第 N 个快照
+    if (parts[1] === 'conv' || parts[1] === 'chat') {
+      if (!sessionId) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: '[FAIL] 无活跃会话' }])
+        return
+      }
+      try {
+        const { listSnapshots, restoreSnapshot } = await import('@/services/SessionSnapshot.js')
+        const snaps = await listSnapshots(sessionId, process.cwd())
+        const idx = parts[2] ? parseInt(parts[2]) - 1 : NaN
+        if (isNaN(idx)) {
+          // 列出对话快照
+          if (snaps.length === 0) {
+            setHistory((h) => [...h, { role: 'assistant' as const, text: '没有对话快照。用 /snapshot <标签> 手动创建快照后再 /rewind conv <序号>' }])
+          } else {
+            const list = snaps.slice(0, 10).map((s, i) =>
+              `${i + 1}. ${s.label}（${new Date(s.createdAt).toLocaleString('zh-CN')}）`,
+            ).join('\n')
+            setHistory((h) => [...h, { role: 'assistant' as const, text: `对话快照：\n${list}\n\n输入 /rewind conv <序号> 恢复对话到该快照` }])
+          }
+          return
+        }
+        const target = snaps[idx]
+        if (!target) {
+          setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 无效序号（共 ${snaps.length} 个对话快照）` }])
+          return
+        }
+        const msgs = await restoreSnapshot(target)
+        chatHistoryRef.current = msgs
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `[ OK ] 对话已回滚到快照: ${target.label}（${msgs.length} 条消息）` }])
+      } catch (e) {
+        setHistory((h) => [...h, { role: 'assistant' as const, text: `[FAIL] 对话回滚失败: ${String(e)}` }])
+      }
+      return
+    }
+
     const idx = parts[1] ? parseInt(parts[1]) - 1 : NaN
     const checkpoints = await listCheckpoints(process.cwd())
     if (checkpoints.length === 0) {
-      setHistory((h) => [...h, { role: 'assistant' as const, text: '没有可回滚的 checkpoint（Edit/Write 改文件时会自动创建）' }])
+      setHistory((h) => [...h, { role: 'assistant' as const, text: '没有可回滚的文件 checkpoint（Edit/Write 改文件时会自动创建）。\n\n对话回滚：/rewind conv <序号>' }])
       return
     }
-    // 无序号：列出最近的
+    // 无序号：列出最近的文件 checkpoint + 提示对话回滚
     if (isNaN(idx)) {
       const recent = checkpoints.slice(0, 10)
       const list = recent.map((c, i) => {
@@ -749,10 +797,10 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
         const shortPath = c.originalPath.replace(process.cwd() + '/', '')
         return `${i + 1}. ${shortPath}（${time}，${c.size}B）`
       }).join('\n')
-      setHistory((h) => [...h, { role: 'assistant' as const, text: `最近的 checkpoint：\n${list}\n\n输入 /rewind <序号> 恢复` }])
+      setHistory((h) => [...h, { role: 'assistant' as const, text: `最近的文件 checkpoint：\n${list}\n\n输入 /rewind <序号> 恢复文件\n输入 /rewind conv 查看对话快照（回滚对话）` }])
       return
     }
-    // 有序号：恢复
+    // 有序号：恢复文件
     const target = checkpoints[idx]
     if (!target) {
       setHistory((h) => [...h, { role: 'assistant' as const, text: `无效序号（共 ${checkpoints.length} 个，最近 10 个可回滚）` }])
@@ -1781,6 +1829,25 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       (args) => { handleAddDirCommand(args); setInput(''); setCursorOffset(0) },
       { requiresRunning: false },
     )
+    // v1.13: /emacs 显示 emacs 风格快捷键（默认全部启用，无需切换）
+    reg.register(
+      { cmd: '/emacs', desc: 'emacs 快捷键', args: '', example: '/emacs' },
+      () => {
+        setHistory((h) => [...h, {
+          role: 'assistant' as const,
+          text: `emacs 风格快捷键（默认全部启用）：
+
+  Ctrl+A  行首        Ctrl+E  行尾
+  Ctrl+B  左移一字符  Ctrl+F  右移一字符
+  Ctrl+P  上一条历史  Ctrl+N  下一条历史
+  Ctrl+U  删到行首    Ctrl+K  删到行尾
+  Ctrl+W  删一个词    Ctrl+L  清屏
+  ↑ / ↓   历史（多行时移动光标）`,
+        }])
+        setInput(''); setCursorOffset(0)
+      },
+      { requiresRunning: false },
+    )
   }
 
   useInput((inputChar, key) => {
@@ -1896,6 +1963,31 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       if (inputChar === 'e') { setCursorOffset(input.length); return } // Ctrl+E 行尾
       if (inputChar === 'b') { setCursorOffset((o) => Math.max(0, o - 1)); return } // Ctrl+B 左移
       if (inputChar === 'f') { setCursorOffset((o) => Math.min(input.length, o + 1)); return } // Ctrl+F 右移
+      // v1.13: emacs 风格 C-n/C-p 历史导航（与 ↑↓ 等效）
+      if (inputChar === 'p') {
+        const history = inputHistoryRef.current
+        if (history.length > 0) {
+          if (historyIndexRef.current === -1) historyIndexRef.current = history.length - 1
+          else historyIndexRef.current = Math.max(0, historyIndexRef.current - 1)
+          const val = history[historyIndexRef.current] ?? ''
+          setInput(val); setCursorOffset(val.length)
+        }
+        return
+      }
+      if (inputChar === 'n') {
+        const history = inputHistoryRef.current
+        if (historyIndexRef.current >= 0) {
+          historyIndexRef.current++
+          if (historyIndexRef.current >= history.length) {
+            historyIndexRef.current = -1
+            setInput(''); setCursorOffset(0)
+          } else {
+            const val = history[historyIndexRef.current] ?? ''
+            setInput(val); setCursorOffset(val.length)
+          }
+        }
+        return
+      }
     }
 
     // 计算当前输入匹配的命令（实时）

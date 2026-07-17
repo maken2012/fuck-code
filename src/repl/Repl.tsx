@@ -29,6 +29,8 @@ import { loadInstructions, generateTemplate } from '@/instruction/agentsMd.js'
 import { loadSkills } from '@/instruction/skills.js'
 import { loadCustomCommands, renderTemplate } from '@/instruction/customCommands.js'
 import { handleVimNormalKey } from '@/repl/vim.js'
+import { takePendingQuestion } from '@/tools/AskUserQuestion.js'
+import type { PendingQuestion } from '@/tools/AskUserQuestion.js'
 import { listCheckpoints, restoreCheckpoint } from '@/tools/checkpoint.js'
 import type { Checkpoint } from '@/tools/checkpoint.js'
 import { loadPromptHistory, appendPromptHistory } from '@/services/PromptHistory.js'
@@ -200,6 +202,13 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   // v1.19: 权限弹窗左右键选中索引（0=本次允许 1=总是允许 2=拒绝）。用 ref 避免 useInput 闭包 stale state
   const permSelRef = useRef(0)
   const [permSel, setPermSel] = useState(0)
+  // v1.19: AskUserQuestion 弹窗——轮询 takePendingQuestion 消费
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null)
+  const pendingQuestionRef = useRef<PendingQuestion | null>(null)
+  const questionSelRef = useRef(0) // 当前选中索引
+  const questionCheckedRef = useRef<Set<number>>(new Set()) // 多选已勾选项
+  const [questionSel, setQuestionSel] = useState(0)
+  const [questionChecked, setQuestionChecked] = useState<number[]>([])
   // v1.19: 子 agent（Task）状态——并发用计数 + 描述列表，状态栏显示"子 agent 在探索 xxx"
   const [subagentDescs, setSubagentDescs] = useState<string[]>([])
   const subagentDescsRef = useRef<string[]>([])
@@ -276,6 +285,30 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
     loadPromptHistory(process.cwd())
       .then((hist) => { inputHistoryRef.current = hist.slice().reverse() })
       .catch(() => {})
+  }, [])
+
+  // v1.19: 轮询 AskUserQuestion 的 pendingQuestion（它不是 queryLoop 事件，走全局队列）
+  // takePendingQuestion 无 pending 时返回一个 pending Promise（等下次 setQuestion 触发）
+  useEffect(() => {
+    let cancelled = false
+    const poll = async () => {
+      while (!cancelled) {
+        try {
+          const q = await takePendingQuestion()
+          if (cancelled || !q) continue
+          pendingQuestionRef.current = q
+          questionSelRef.current = 0
+          questionCheckedRef.current = new Set()
+          setQuestionSel(0)
+          setQuestionChecked([])
+          setPendingQuestion(q)
+        } catch {
+          // 出错继续轮询
+        }
+      }
+    }
+    void poll()
+    return () => { cancelled = true }
   }, [])
 
   // 状态切换时刷新暴躁文案（不在渲染时调 attitudeFor 避免每次按键都变）
@@ -2053,6 +2086,45 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       if (key.ctrl && (inputChar === 'c' || inputChar === 'd')) { decide(2); return }
       return // 其他键忽略
     }
+    // v1.19: AskUserQuestion 弹窗——← → 切换、Space 多选、Enter 提交
+    const pq = pendingQuestionRef.current
+    if (pq) {
+      const count = pq.options.length
+      const submit = () => {
+        const checked = questionCheckedRef.current
+        const sel = questionSelRef.current
+        // 单选：返回当前选中；多选：返回所有勾选（无勾选则用当前选中）
+        let answers: string[]
+        if (pq.multiSelect) {
+          answers = checked.size > 0
+            ? [...checked].sort((a, b) => a - b).map((i) => pq.options[i]?.label ?? '')
+            : [pq.options[sel]?.label ?? '']
+        } else {
+          answers = [pq.options[sel]?.label ?? '']
+        }
+        pq.resolve(answers.filter(Boolean))
+        pendingQuestionRef.current = null
+        setPendingQuestion(null)
+        questionSelRef.current = 0
+        questionCheckedRef.current = new Set()
+      }
+      if (key.leftArrow) { questionSelRef.current = (questionSelRef.current - 1 + count) % count; setQuestionSel(questionSelRef.current); return }
+      if (key.rightArrow) { questionSelRef.current = (questionSelRef.current + 1) % count; setQuestionSel(questionSelRef.current); return }
+      if (key.upArrow) { questionSelRef.current = (questionSelRef.current - 1 + count) % count; setQuestionSel(questionSelRef.current); return }
+      if (key.downArrow) { questionSelRef.current = (questionSelRef.current + 1) % count; setQuestionSel(questionSelRef.current); return }
+      if (pq.multiSelect && inputChar === ' ') {
+        const s = questionCheckedRef.current
+        if (s.has(questionSelRef.current)) s.delete(questionSelRef.current)
+        else s.add(questionSelRef.current)
+        setQuestionChecked([...s].sort((a, b) => a - b))
+        return
+      }
+      if (key.return) { submit(); return }
+      // 数字键 1-4 直接选
+      const num = parseInt(inputChar)
+      if (num >= 1 && num <= count) { questionSelRef.current = num - 1; setQuestionSel(num - 1); if (!pq.multiSelect) { submit() }; return }
+      return // 其他键忽略
+    }
     // v1.19: 按 t 切换最近一条 thinking 消息的展开/折叠（仅输入框为空时，避免打字拦截）
     if (inputChar === 't' && input.length === 0 && !running) {
       setHistory((h) => {
@@ -2434,14 +2506,41 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         </Box>
       )}
 
+      {/* v1.19: AskUserQuestion 选择弹窗 */}
+      {pendingQuestion && (
+        <Box marginTop={1} flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+          <Text color="cyan" bold>❓ {pendingQuestion.header}</Text>
+          <Text>{pendingQuestion.question}</Text>
+          <Box marginTop={1} flexDirection="column">
+            {pendingQuestion.options.map((opt, i) => {
+              const sel = i === questionSel
+              const checked = pendingQuestion.multiSelect && questionChecked.includes(i)
+              const mark = pendingQuestion.multiSelect ? (checked ? '[x]' : '[ ]') : (sel ? '›' : ' ')
+              const rec = opt.recommended ? ' (推荐)' : ''
+              return (
+                <Box key={i}>
+                  <Text color={sel ? 'cyan' : undefined} bold={sel}>
+                    {` ${mark} ${i + 1}. ${opt.label}${rec}`}
+                  </Text>
+                </Box>
+              )
+            })}
+          </Box>
+          {pendingQuestion.options[questionSel]?.description && (
+            <Text dimColor>  {pendingQuestion.options[questionSel]!.description}</Text>
+          )}
+          <Text dimColor>← → 或 1-{pendingQuestion.options.length} 切换 · {pendingQuestion.multiSelect ? 'Space 勾选 · ' : ''}Enter 确认</Text>
+        </Box>
+      )}
+
       {/* 输入框——委托给 InputBox 子组件 */}
-      <InputBox input={input} running={running} visible={!pendingPermission} cursorOffset={cursorOffset} vimMode={vimIndicator} />
+      <InputBox input={input} running={running} visible={!pendingPermission && !pendingQuestion} cursorOffset={cursorOffset} vimMode={vimIndicator} />
 
       {/* 实时命令提示——委托给 CommandHints 子组件 */}
       <CommandHints
         hints={matchCommands(input).map((c) => ({ cmd: c.cmd, desc: c.desc, args: c.args, example: c.example }))}
         selectedIndex={cmdHintIndex}
-        visible={!pendingPermission && !running && input.startsWith('/')}
+        visible={!pendingPermission && !pendingQuestion && !running && input.startsWith('/')}
       />
 
       {/* 底部状态栏——委托给 StatusBar 子组件 */}

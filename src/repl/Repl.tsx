@@ -123,6 +123,18 @@ function matchCommands(input: string): typeof ALL_COMMANDS {
   return all.filter((c) => c.cmd.startsWith(input))
 }
 
+// 判断文本是"斜杠命令"还是"绝对路径/普通文本"。
+// 关键区分：斜杠命令是 / 后跟命令名（小写字母/数字/连字符，如 /help /add-dir）；
+// 而 Unix 绝对路径是 / 后跟路径段（含 / 或大写，如 /Users/... /tmp/...）。
+// 规则：/ 后第一个 token 只含 [a-z0-9-] 且不含 / → 当命令；否则当普通文本。
+function isSlashCommand(text: string): boolean {
+  if (!text.startsWith('/')) return false
+  // / 后取第一个空白前的 token（命令名部分，含前导 /）
+  const token = text.split(/\s+/)[0] ?? text
+  // 命令名格式：/ 后跟 1+ 个 [a-z0-9-] 字符，整体不含额外 /
+  return /^\/[a-z0-9][a-z0-9-]*$/.test(token)
+}
+
 export interface ReplProps {
   version?: string
   /** 初始模型（来自 config 或 CLI --model 覆盖） */
@@ -2024,8 +2036,8 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
             // normal 模式回车提交
             const text = input.trim()
             if (text) {
-              // 走回车提交逻辑（复用下面的 return 分支太复杂，这里直接触发 runQuery）
-              if (commandRegistryRef.current && text.startsWith('/')) {
+                  // 走回车提交逻辑（复用下面的 return 分支太复杂，这里直接触发 runQuery）
+              if (commandRegistryRef.current && isSlashCommand(text)) {
                 const registry = commandRegistryRef.current
                 void registry.tryExecute(text, running).then((handled) => {
                   if (handled) setInput('')
@@ -2187,7 +2199,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       const text = input.trim()
 
       // 1. 先尝试注册的命令
-      if (commandRegistryRef.current && text.startsWith('/')) {
+      if (commandRegistryRef.current && isSlashCommand(text)) {
         const registry = commandRegistryRef.current
         void registry.tryExecute(text, running).then((handled) => {
           if (handled) setInput('')
@@ -2199,7 +2211,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       }
 
       // 2. 自定义命令（.fuckcode/commands/*.md）
-      if (text.startsWith('/') && !text.startsWith('/ ')) {
+      if (isSlashCommand(text) && !text.startsWith('/ ')) {
         const cmdName = text.slice(1).split(/\s+/)[0] ?? ''
         const cmdArgs = text.slice(1 + cmdName.length).trim()
         if (cmdName && !running) {

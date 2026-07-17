@@ -506,14 +506,18 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
           case 'turn_end':
             // 深度比对修复 #7: turn_end 时 flush 残留工具 batch
             flushToolBatch()
-            // 只在最终轮（非 tool_use）把本轮对话存入 chatHistoryRef。
-            // 工具调用中间轮（stopReason='tool_use'）不存——避免重复 push
-            // 和跨轮文本累积污染。
-            // 注意：sessionId 存在时，磁盘历史由 queryLoop 维护，
-            // chatHistoryRef 仅作显示用（M5 也可在 resume 后留空）。
             if (event.stopReason !== 'tool_use') {
+              // 最终轮：把本轮对话存入 chatHistoryRef
               historyMgrRef.recordTurn(text, assistantText)
               chatHistoryRef.current = historyMgrRef.getChat()
+            } else {
+              // 工具调用中间轮：重置文本累积状态，防止下一轮 text_delta 接着本轮文本
+              // 往后追加（导致"回复无限累积重复"——每轮把前面所有轮的文本重复一遍）
+              assistantText = ''
+              thinkingTextRef.current = ''
+              thinkingShownRef.current = false
+              // 给下一轮的文本累积 push 一条新的空 assistant 消息
+              setHistory((h) => [...h, { role: 'assistant' as const, text: '' }])
             }
             break
           case 'aborted':
@@ -1976,6 +1980,9 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
       },
       { requiresRunning: false },
     )
+    // 关键:把注册好的 registry 实例赋给 ref，否则 commandRegistryRef.current 永远是 null，
+    // 所有 / 命令分发会短路跳过、fallthrough 到自定义命令 → 报"未知命令"
+    commandRegistryRef.current = reg
   }
 
   useInput((inputChar, key) => {

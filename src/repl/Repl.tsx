@@ -197,6 +197,12 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
   const [configLoaded, setConfigLoaded] = useState(false)
   const [pendingPermission, setPendingPermission] =
     useState<PendingPermission | null>(null)
+  // v1.19: 权限弹窗左右键选中索引（0=本次允许 1=总是允许 2=拒绝）。用 ref 避免 useInput 闭包 stale state
+  const permSelRef = useRef(0)
+  const [permSel, setPermSel] = useState(0)
+  // v1.19: 子 agent（Task）状态——并发用计数 + 描述列表，状态栏显示"子 agent 在探索 xxx"
+  const [subagentDescs, setSubagentDescs] = useState<string[]>([])
+  const subagentDescsRef = useRef<string[]>([])
   // M5：当前会话 id（启动期创建）。null 表示尚未就绪（首次创建 in flight）。
   const [sessionId, setSessionId] = useState<string | null>(null)
   const chatHistoryRef = useRef<ChatMessage[]>([])
@@ -405,30 +411,41 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             }
             break
           case 'thinking_delta': {
-            // 深度比对修复 #8: thinking/reasoning 折叠显示
+            // v1.19: thinking 折叠显示——首次 push 折叠态消息，后续只更新 thinkingText 字段（不刷屏全文）
             thinkingTextRef.current += event.text
-            // 更新 thinking 行（只在有 thinking 内容时显示）
             if (!thinkingShownRef.current) {
               thinkingShownRef.current = true
-              setHistory((h) => [...h, { role: 'assistant' as const, text: '(thinking...)' }])
+              // push 一条 kind:'thinking' 折叠消息
+              setHistory((h) => [...h, {
+                role: 'assistant' as const,
+                text: `▸ 思考过程(0 字)`,
+                kind: 'thinking',
+                thinkingText: '',
+                expanded: false,
+              }])
             }
-            // 节流更新（同 text_delta）
+            // 节流更新折叠态的字数（不把全文刷到屏幕，避免刷屏）
             if (!flushTimerRef.current) {
               flushTimerRef.current = setTimeout(() => {
                 flushTimerRef.current = null
                 const snapshot = thinkingTextRef.current
                 setHistory((h) => {
                   const copy = [...h]
-                  // 找最后的 thinking 行更新
+                  // 找最后一条 thinking 消息更新字数 + thinkingText（折叠态保留全文供展开）
                   for (let j = copy.length - 1; j >= 0; j--) {
-                    if (copy[j]?.text.startsWith('(thinking')) {
-                      copy[j] = { role: 'assistant' as const, text: `(thinking) ${snapshot.slice(-200)}...` }
+                    if (copy[j]?.kind === 'thinking') {
+                      const expanded = copy[j]!.expanded ?? false
+                      copy[j] = {
+                        ...copy[j]!,
+                        thinkingText: snapshot,
+                        text: expanded ? snapshot : `▸ 思考过程(${snapshot.length} 字) 按 t 展开`,
+                      }
                       break
                     }
                   }
                   return copy
                 })
-              }, 200) // thinking 更新慢一些（200ms 够了）
+              }, 200)
             }
             break
           }
@@ -438,6 +455,15 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
             const summary = inputStr.slice(0, 60)
             // v1.18: 存 toolUseId 用于并发工具进度精确匹配
             toolBatchRef.current.push({ tool: `${toolTag(event.tool)} ${summary}`, status: 'running', ...(event.toolUseId ? { id: event.toolUseId } : {}) })
+            // v1.19: Task 子 agent —— 提取 description 到状态栏
+            if (event.tool === 'Task' && event.input && typeof event.input === 'object') {
+              const desc = (event.input as { description?: string }).description
+              if (desc) {
+                const next = [...subagentDescsRef.current, desc]
+                subagentDescsRef.current = next
+                setSubagentDescs(next)
+              }
+            }
             break
           }
           case 'tool_progress': {
@@ -472,6 +498,12 @@ export function Repl({ version = '0.1.0', initialModel, initialApiKey, initialAp
                 batch[j] = { tool: batch[j]!.tool, status: event.ok ? 'ok' : 'fail' }
                 break
               }
+            }
+            // v1.19: Task 完成时从状态栏清除（FIFO，并发下移除最早一个）
+            if (event.tool === 'Task' && subagentDescsRef.current.length > 0) {
+              const next = subagentDescsRef.current.slice(1)
+              subagentDescsRef.current = next
+              setSubagentDescs(next)
             }
             break
           }
@@ -1990,34 +2022,58 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
     // 读 ref 而非 state（useInput 闭包持有的是首次注册时的 state，看不到后续更新）。
     const pending = pendingPermissionRef.current
     if (pending) {
-      if (inputChar === 'y' || inputChar === 'Y') {
-        pending.resolve('allow')
-        pendingPermissionRef.current = null
-        setPendingPermission(null)
+      // v1.19: 左右键切换选项（0=本次允许 1=总是允许 2=拒绝），Enter 确认
+      // 保留 y/a/n 快捷键兼容老手
+      const PERM_OPTIONS = 3
+      if (key.leftArrow) {
+        permSelRef.current = (permSelRef.current - 1 + PERM_OPTIONS) % PERM_OPTIONS
+        setPermSel(permSelRef.current)
         return
       }
-      // 深度比对修复 #5: "a" = 总是允许（记住，同工具不再问）
-      if (inputChar === 'a' || inputChar === 'A') {
-        alwaysAllowRef.current.add(pending.tool)
-        pending.resolve('allow')
-        pendingPermissionRef.current = null
-        setPendingPermission(null)
+      if (key.rightArrow) {
+        permSelRef.current = (permSelRef.current + 1) % PERM_OPTIONS
+        setPermSel(permSelRef.current)
         return
       }
-      if (inputChar === 'n' || inputChar === 'N') {
-        pending.resolve('deny')
+      const decide = (idx: number) => {
+        if (idx === 0) { pending.resolve('allow') }
+        else if (idx === 1) { alwaysAllowRef.current.add(pending.tool); pending.resolve('allow') }
+        else { pending.resolve('deny') }
         pendingPermissionRef.current = null
         setPendingPermission(null)
-        return
+        permSelRef.current = 0
+        setPermSel(0)
       }
-      // Ctrl+C 在弹窗中视为拒绝（让用户能快速 escape）
-      if (key.ctrl && (inputChar === 'c' || inputChar === 'd')) {
-        pending.resolve('deny')
-        pendingPermissionRef.current = null
-        setPendingPermission(null)
-        return
-      }
-      return // 其他键忽略，继续等 y/n
+      if (key.return) { decide(permSelRef.current); return }
+      // 快捷键兼容：y=本次允许 a=总是允许 n=拒绝
+      if (inputChar === 'y' || inputChar === 'Y') { decide(0); return }
+      if (inputChar === 'a' || inputChar === 'A') { decide(1); return }
+      if (inputChar === 'n' || inputChar === 'N') { decide(2); return }
+      // Ctrl+C 在弹窗中视为拒绝
+      if (key.ctrl && (inputChar === 'c' || inputChar === 'd')) { decide(2); return }
+      return // 其他键忽略
+    }
+    // v1.19: 按 t 切换最近一条 thinking 消息的展开/折叠（仅输入框为空时，避免打字拦截）
+    if (inputChar === 't' && input.length === 0 && !running) {
+      setHistory((h) => {
+        const copy = [...h]
+        for (let j = copy.length - 1; j >= 0; j--) {
+          if (copy[j]?.kind === 'thinking') {
+            const m = copy[j]!
+            const expanded = !m.expanded
+            copy[j] = {
+              ...m,
+              expanded,
+              text: expanded ? (m.thinkingText ?? '') : `▸ 思考过程(${(m.thinkingText ?? '').length} 字) 按 t 展开`,
+            }
+            // 展开时 text 显示全文，折叠时显示提示
+            if (expanded) copy[j]!.text = `▾ 思考过程(${(m.thinkingText ?? '').length} 字) 按 t 折叠`
+            break
+          }
+        }
+        return copy
+      })
+      return
     }
     // v1.18: vim modal 编辑——vim 开启时接管按键
     if (vimEnabledRef.current) {
@@ -2356,7 +2412,25 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         <Box marginTop={1} flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
           <Text color="yellow" bold>[WARN] {pendingPermission.tool}</Text>
           <Text>{pendingPermission.summary}</Text>
-          <Text dimColor>[y] 本次允许 · [a] 总是允许 · [n] 拒绝 · [Ctrl+C] 拒绝</Text>
+          <Box marginTop={1}>
+            {(() => {
+              const opts = ['本次允许', '总是允许', '拒绝']
+              const colors = ['green', 'cyan', 'red']
+              return opts.map((label, i) => {
+                const sel = i === permSel
+                const sep = i > 0 ? '   ' : ''
+                return (
+                  <React.Fragment key={label}>
+                    <Text dimColor>{sep}</Text>
+                    <Text color={colors[i]} bold={sel} backgroundColor={sel ? colors[i] : undefined}>
+                      {sel ? ` › ${label}‹ ` : `  ${label}  `}
+                    </Text>
+                  </React.Fragment>
+                )
+              })
+            })()}
+          </Box>
+          <Text dimColor>← → 切换 · Enter 确认 · (y/a/n 快捷键)</Text>
         </Box>
       )}
 
@@ -2378,6 +2452,7 @@ ${tips.length > 0 ? '优化建议：\n' + tips.join('\n') : '上下文占用健�
         totalTokens={totalTokensRef.current}
         idleAttitude={idleAttitudeRef.current}
         genAttitude={genAttitudeRef.current}
+        subagentDescs={subagentDescs}
       />
     </Box>
   )

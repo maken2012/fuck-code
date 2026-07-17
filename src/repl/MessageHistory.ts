@@ -23,9 +23,13 @@ export interface TokenBreakdown {
 export interface DisplayMessage {
   role: 'user' | 'assistant'
   text: string
-  kind?: 'text' | 'diff' | 'dashboard'
+  kind?: 'text' | 'diff' | 'dashboard' | 'thinking'
   diffs?: DiffEntry[]
   tokens?: TokenBreakdown
+  /** v1.19: thinking 消息的完整文本（折叠时只显示字数，展开显示全文） */
+  thinkingText?: string
+  /** v1.19: thinking 是否展开 */
+  expanded?: boolean
 }
 
 /**

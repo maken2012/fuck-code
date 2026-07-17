@@ -35,6 +35,19 @@ function MessageListComponent({ messages, running }: MessageListProps) {
             </Box>
           )
         }
+        // v1.19: thinking 折叠/展开渲染
+        if (m.kind === 'thinking') {
+          const expanded = m.expanded ?? false
+          const text = m.thinkingText ?? ''
+          return (
+            <Box key={i} marginLeft={1} flexDirection="column">
+              <Text color="gray" dimColor>
+                {expanded ? `▾ 思考过程(${text.length} 字) 按 t 折叠` : `▸ 思考过程(${text.length} 字) 按 t 展开`}
+              </Text>
+              {expanded && <Text color="gray" dimColor>{text}</Text>}
+            </Box>
+          )
+        }
         if (m.role === 'user') {
           return (
             <Box key={i} marginTop={i === 0 ? 1 : 0}>
